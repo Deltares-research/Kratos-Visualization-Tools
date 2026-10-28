@@ -1,0 +1,102 @@
+{
+  "//": "Compact form of eemdijk_blue_plot_config.json; uses shared plot and series defaults.",
+  "//requires": "The stage output JSON and comparison CSV files produced by eemdijk.json.",
+  "mesh": {
+    "mdpa_file": "eemdijk.mdpa"
+  },
+  "node_sets": {
+    "wall": { "sub_model_part": "sheetpile_aggregate" },
+    "interface": { "sub_model_part": "interface_aggregate_excl9" }
+  },
+  "stages": [
+    "12_Damwand_installatie",
+    "13_Kraan_weg",
+    "14_Slag_9",
+    "15_Switch_ssc_naar_ss",
+    "16_Ontgraven",
+    "17_WS_verlagen",
+    "18_WS_verhogen_in_kern",
+    "19_WS_verhogen_in_talud",
+    "20_Bovenbelasting"
+  ],
+  "figure_defaults": {
+    "type": "profiles_per_stage",
+    "ylabel": "$y$ [m]"
+  },
+  "series_templates": {
+    "wall_kratos": {
+      "label": "Kratos",
+      "file": "{stage}__output_wall.json",
+      "node_set": "wall",
+      "marker": ".",
+      "color": "#1f77b4"
+    },
+    "interface_kratos": {
+      "label": "Kratos",
+      "file": "{stage}__output_interface.json",
+      "node_set": "interface",
+      "variable": "GEO_EFFECTIVE_TRACTION_VECTOR",
+      "scale": 0.001,
+      "marker": ".",
+      "color": "#1f77b4"
+    },
+    "wall_comparison": {
+      "source": "csv",
+      "label": "Commercial FE package",
+      "file": "results_lin_elastic/{stage}__FE_comparison_wall.csv",
+      "y_column": "Level [m]",
+      "marker": ".",
+      "color": "#ff7f0e"
+    },
+    "interface_comparison": {
+      "source": "csv",
+      "label": "Commercial FE package",
+      "file": "results_lin_elastic/{stage}__FE_comparison_interface.csv",
+      "y_column": "Level [m]",
+      "marker": ".",
+      "color": "#ff7f0e"
+    }
+  },
+  "figures": [
+    {
+      "name": "bending_moment.svg",
+      "xlabel": "Bending moment [kNm/m]",
+      "series": [
+        { "template": "wall_kratos", "variable": "BENDING_MOMENT", "scale": 0.001 },
+        { "template": "wall_comparison", "x_column": "Moment [kNm/m]" }
+      ]
+    },
+    {
+      "name": "shear_forces.svg",
+      "xlabel": "Shear force [kN/m]",
+      "series": [
+        { "template": "wall_kratos", "variable": "SHEAR_FORCE", "scale": 0.001 },
+        { "template": "wall_comparison", "x_column": "Shear Force [kN/m]", "x_scale": -1.0 }
+      ]
+    },
+    {
+      "name": "horizontal_total_displacements.svg",
+      "xlabel": "Total Horizontal Displacement [mm]",
+      "series": [
+        { "template": "wall_kratos", "variable": "TOTAL_DISPLACEMENT_X", "scale": 1000.0 },
+        { "template": "wall_comparison", "x_column": "Total Horizontal Displacement [mm]" }
+      ]
+    },
+    {
+      "name": "normal_tractions_all_stages.svg",
+      "xlabel": "Normal Traction [$\\mathrm{kN} / \\mathrm{m}^2$]",
+      "series": [
+        { "template": "interface_kratos", "component": 0 },
+        { "template": "interface_comparison", "x_column": "Sigma_n [kN/m^2]" }
+      ]
+    },
+    {
+      "name": "shear_tractions_all_stages.svg",
+      "xlabel": "Shear Traction [$\\mathrm{kN} / \\mathrm{m}^2$]",
+      "series": [
+        { "template": "interface_kratos", "component": 1 },
+        { "template": "interface_comparison", "x_column": "Tau_1 [kN/m^2]" }
+      ]
+    }
+  ]
+}

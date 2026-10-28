@@ -1,0 +1,32 @@
+{
+  "mode": "comparison",
+  "solutions": [
+    {
+      "label": "first",
+      "mesh": "C:\\Users\\markelov\\AppData\\Local\\Temp\\pytest-of-markelov\\pytest-363\\test_comparison_keyboard_dispa0\\first.post.msh",
+      "results": "C:\\Users\\markelov\\AppData\\Local\\Temp\\pytest-of-markelov\\pytest-363\\test_comparison_keyboard_dispa0\\first.post.res"
+    },
+    {
+      "label": "second",
+      "mesh": "C:\\Users\\markelov\\AppData\\Local\\Temp\\pytest-of-markelov\\pytest-363\\test_comparison_keyboard_dispa0\\second.post.msh",
+      "results": "C:\\Users\\markelov\\AppData\\Local\\Temp\\pytest-of-markelov\\pytest-363\\test_comparison_keyboard_dispa0\\second.post.res"
+    }
+  ],
+  "result": "PRESSURE",
+  "step": "0",
+  "location": null,
+  "component": "magnitude",
+  "tensor_component": "trace",
+  "profile_x": 0.0,
+  "profile_path": null,
+  "style": "isolines+background",
+  "inspection_method": "idw",
+  "colormap": "YlGnBu",
+  "vmin": 10.0,
+  "vmax": 22.0,
+  "show_mesh": true,
+  "show_isolines": false,
+  "show_domain_edge": false,
+  "show_isoline_labels": true,
+  "show_profile": true
+}

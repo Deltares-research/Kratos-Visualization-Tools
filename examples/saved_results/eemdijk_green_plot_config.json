@@ -1,0 +1,89 @@
+{
+  "//": "Compact form of eemdijk_green_plot_config.json using figure and series templates.",
+  "//requires": "Stage JSON output and results_lin_elastic/*.csv for the oude zomerkade variant.",
+  "data_dir": "../Eemdijk_green_oude_zomerkade",
+  "output_dir": "../Eemdijk_green_oude_zomerkade",
+  "mesh": {
+    "mdpa_file": "eemdijk.mdpa"
+  },
+  "node_sets": {
+    "assertion_nodes": { "sub_model_part": "AssertionNodeSelection" },
+    "nodes_at_neg_80cm": { "sub_model_part": "nodes_at_neg_80cm" }
+  },
+  "stages": "auto",
+  "figure_templates": {
+    "assertion_node_history": {
+      "type": "histories_per_node",
+      "node_set": "assertion_nodes",
+      "xlabel": "Time [s]"
+    }
+  },
+  "series_templates": {
+    "history_kratos": {
+      "source": "kratos_json",
+      "label": "Kratos",
+      "file": "{stage}_json_output.json",
+      "marker": "."
+    },
+    "history_comparison": {
+      "source": "csv",
+      "label": "Commercial FE package",
+      "file": "results_lin_elastic/output_end_of_stage.csv",
+      "x_column": "Time [s]",
+      "marker": ".",
+      "color": "tab:orange"
+    },
+    "displacement_kratos": {
+      "source": "kratos_json",
+      "label": "Kratos",
+      "file": "{stage}_nodes_at_neg_80cm.json",
+      "node_set": "nodes_at_neg_80cm",
+      "x": "node_x",
+      "y": "value",
+      "sort_by": "x",
+      "line_style": "",
+      "marker": "."
+    },
+    "displacement_comparison": {
+      "source": "csv",
+      "label": "Commercial FE package",
+      "file": "results_lin_elastic/soil_nodes_y_minus_0_8_uy_all_phases.csv",
+      "x_column": "X [m]",
+      "marker": ".",
+      "color": "tab:orange"
+    }
+  },
+  "figures": [
+    {
+      "template": "assertion_node_history",
+      "name": "TOTAL_DISPLACEMENT_X.svg",
+      "ylabel": "Total Horizontal Displacement [m]",
+      "series": [
+        { "template": "history_kratos", "variable": "TOTAL_DISPLACEMENT_X" },
+        { "template": "history_comparison", "y_column": "node_{node} - Ux [m]" }
+      ]
+    },
+    {
+      "template": "assertion_node_history",
+      "name": "CAUCHY_STRESS_VECTOR.svg",
+      "ylabel": "Effective Horizontal Stress [kPa]",
+      "series": [
+        { "template": "history_kratos", "variable": "CAUCHY_STRESS_VECTOR", "component": 0, "scale": 0.001 },
+        { "template": "history_comparison", "y_column": "node_{node} - SigxxE [kN/m2]" }
+      ]
+    },
+    {
+      "name": "displacement_{stage}.svg",
+      "type": "single",
+      "per_stage_files": true,
+      "title": "{stage}",
+      "xlabel": "x [m]",
+      "ylabel": "y displacement [m]",
+      "annotate_min_max": true,
+      "series": [
+        { "template": "displacement_kratos", "variable": "TOTAL_DISPLACEMENT_Y" },
+        { "template": "displacement_comparison", "y_column": "{stage} - Uy [m]" }
+      ]
+    }
+  ]
+}

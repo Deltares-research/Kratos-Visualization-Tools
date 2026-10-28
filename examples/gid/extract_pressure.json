@@ -1,0 +1,32 @@
+{
+  "files": ["1_Initial_stage",
+                "2_Null_step",
+                "3_Slag_1",
+                "4_Slag_2",
+                "5_Slag_3",
+                "6_Slag_4",
+                "7_Slag_5",
+                "8_Slag_6",
+                "9_Slag_7",
+                "10_Slag_8",
+                "11_Kraan_load",
+                "12_Damwand_installatie",
+                "13_Kraan_weg",
+                "14_Slag_9",
+                "15_Switch_ssc_naar_ss",
+                "16_Ontgraven",
+                "17_WS_verlagen",
+                "18_WS_verhogen_in_kern",
+                "19_WS_verhogen_in_talud",
+                "20_Bovenbelasting"],
+  "result": "WATER_PRESSURE",
+  "step": "latest",
+  "location": "auto",
+  "component": "magnitude",
+  "line": {
+    "start": [15.0, -20.0],
+    "end": [15.0, 6.0],
+    "samples": 200
+  },
+  "output_csv": "pressure_profile.csv"
+}

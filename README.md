@@ -14,8 +14,8 @@ Please perform independent review, validation, and testing before use.
 # Kratos Visualization Tools
 
 This repository contains lightweight visualization utilities for Kratos
-Multiphysics output. The MDPA visualizer parses mesh topology and project JSON
-separately from its interactive matplotlib interface.
+Multiphysics meshes and simulation output: an MDPA mesh visualizer, a GiD results
+viewer, and a configuration-driven plotter for saved results.
 
 ## Install
 
@@ -61,6 +61,21 @@ two tools can also be run without the root scripts:
 kratos-visualize-gid path/to/case --list
 kratos-plot-saved-results my_config.json --output-dir ./figures
 ```
+
+## Optional GiD desktop interface
+
+Install the PySide6 interface and launch it with `--gui`:
+
+```powershell
+python -m pip install -e ".[gui]"
+python visualize_gid_results.py path\to\case --gui
+```
+
+The desktop interface embeds the existing Matplotlib plot and provides visible
+controls instead of requiring hotkeys. It supports single-solution viewing and
+folder browsing (`--folder path\to\results --gui`). The existing keyboard-driven
+viewer remains the default; comparison mode continues to use that viewer.
+See the [GiD documentation](./visualize_gid_results.md) for details.
 
 ## Tests
 

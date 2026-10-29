@@ -10,11 +10,44 @@ Standalone viewer and extractor for GiD mesh and result files. The script reads 
 - save a static plot or open an interactive viewer;
 - export values sampled along an arbitrary line to CSV.
 
-The script only needs `numpy` and `matplotlib`; it does not run a Kratos simulation.
+The default script only needs `numpy` and `matplotlib`; it does not run a Kratos
+simulation. The optional desktop interface additionally requires `PySide6`.
 
 After installation, `kratos-visualize-gid` accepts the same arguments as
 `python visualize_gid_results.py`. The implementation lives in
 `kratos_visualization_tools.gid`; the root module retains its existing import API.
+
+## Optional desktop interface
+
+Install the optional GUI dependencies from the repository root:
+
+```powershell
+python -m pip install -e ".[gui]"
+
+# Open one solution with visible desktop controls
+python visualize_gid_results.py path\to\case --gui
+
+# Browse the solutions in a folder
+python visualize_gid_results.py --folder path\to\results --gui
+```
+
+After installation, `kratos-visualize-gid` also accepts `--gui`.
+The PySide6 window embeds the Matplotlib plot with a navigation toolbar and a
+control sidebar. Result, step, location, and component selectors replace
+keyboard-only browsing. Display controls expose mesh, gradients, isolines,
+labels, profiles, and displacement deformation. Image/settings and CSV exports
+are available through visible controls, and coordinate inspection displays a
+desktop report. Previous/next controls and playback make time-step browsing
+discoverable.
+
+Existing initial-view options, such as `--result`, `--component`, `--profile`,
+`--profile-path`, and `--settings`, can be used with `--gui`.
+The GUI is an opt-in single-solution interface, including folder browsing; it
+does not replace the comparison viewer in this first migration stage. Use the
+existing viewer without `--gui` for `--compare`. Listing, batch extraction, and
+static exports remain available without PySide6.
+Single-solution colour ranges remain automatic; `--vmin` and `--vmax` are
+comparison-only and are rejected with `--gui`.
 
 ## Input files
 

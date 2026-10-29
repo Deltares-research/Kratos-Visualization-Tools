@@ -1250,15 +1250,17 @@ class InteractiveViewer:
         elif event.button == "down":
             self._zoom_main_axes(1.15, float(event.xdata), float(event.ydata))
 
-    def export_profile_data(self):
-        """Export profile data to CSV file."""
+    def export_profile_data(self, out_path: Optional[Path] = None, *, strict: bool = False):
+        """Export profile CSV; strict callers receive its path or an exception."""
         if self.profile_y_data is None or self.profile_values is None:
+            if strict:
+                raise ValueError("No profile data to export. Please ensure profile is visible.")
             print("No profile data to export. Please ensure profile is visible.")
             return
 
         try:
             step = int(float(self.current_step_str)) if self.current_step_str != "latest" else "latest"
-            out_path = build_result_export_path(
+            out_path = out_path or build_result_export_path(
                 self.current_result,
                 str(step),
                 self.current_location,
@@ -1276,12 +1278,17 @@ class InteractiveViewer:
                     writer.writerow([y, val, grad])
 
             print(f"Profile exported to: {out_path.resolve()}")
+            return out_path
         except Exception as e:
+            if strict:
+                raise
             print(f"Error exporting profile: {e}")
 
-    def export_current_field_data(self):
-        """Export the current nodal field, including gradients when gradient mode is active."""
+    def export_current_field_data(self, out_path: Optional[Path] = None, *, strict: bool = False):
+        """Export gradient CSV; strict callers receive its path or an exception."""
         if not self.show_gradient:
+            if strict:
+                raise ValueError("Gradient export requires gradient mode.")
             print("Gradient export is only available while gradient mode is on. Press 'd' first.")
             return
         if (
@@ -1293,6 +1300,8 @@ class InteractiveViewer:
             or self.current_field_grad_y is None
             or self.current_field_grad_magnitude is None
         ):
+            if strict:
+                raise ValueError("No gradient field is currently available to export.")
             print("No gradient field is currently available to export.")
             return
 
@@ -1300,7 +1309,7 @@ class InteractiveViewer:
             step = int(float(self.current_step_str)) if self.current_step_str != "latest" else "latest"
             result_type = next((h.result_type for h in self.headers if h.name == self.current_result), "Scalar")
             tensor_component = self.current_tensor_component if result_type.lower() == "matrix" else None
-            out_path = build_result_export_path(
+            out_path = out_path or build_result_export_path(
                 self.current_result,
                 str(step),
                 self.current_location,
@@ -1365,7 +1374,10 @@ class InteractiveViewer:
                 f"Gradient field exported to: {out_path.resolve()} "
                 f"({exported_count} valid nodes, {skipped_count} skipped)"
             )
+            return out_path
         except Exception as e:
+            if strict:
+                raise
             print(f"Error exporting gradient field: {e}")
 
     def _toggle_flag(self, attribute_name: str):

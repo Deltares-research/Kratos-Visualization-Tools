@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--mdpa", default="", help="Optional .mdpa path for --active filtering")
     parser.add_argument("--save", default="", help="Optional output image path; if omitted, use interactive mode")
     parser.add_argument("--interactive", action="store_true", help="Force interactive mode (default if --save omitted)")
+    parser.add_argument("--gui", action="store_true", help="Use the optional PySide6 single-solution window (install .[gui])")
     parser.add_argument("--isolines", action="store_true", help="Show solid isolines over filled single-solution fields")
     parser.add_argument("--isoline-labels", action="store_true", help="Label isolines compactly with their values")
     parser.add_argument("--contour-levels", type=int, default=12, help="Number of isoline levels (minimum 2)")
@@ -110,6 +111,17 @@ def main():
 
     args = parser.parse_args()
 
+    def validate_gui():
+        if args.gui:
+            for incompatible in ("compare", "list", "extract_json"):
+                if getattr(args, incompatible):
+                    parser.error(f"--gui cannot be used with --{incompatible.replace('_', '-')}")
+            if args.save and not args.interactive:
+                parser.error("--gui cannot be used with static --save; add --interactive")
+            if args.vmin is not None or args.vmax is not None:
+                parser.error("--gui manual color ranges are not yet supported; omit --vmin/--vmax")
+
+    validate_gui()
     if (args.plot_config or args.plot_show) and not args.extract_json:
         parser.error("--plot-config and --plot-show require --extract-json")
     if args.plot_show and not args.plot_config:
@@ -139,6 +151,7 @@ def main():
         elif settings["mode"] == "single" and args.compare:
             raise ValueError("Single-solution settings cannot be used with --compare.")
 
+    validate_gui()
     if args.extract_json:
         json_path = Path(args.extract_json).expanduser().resolve()
         if not json_path.exists():
@@ -290,9 +303,19 @@ def main():
     use_interactive = (not args.save) or args.interactive
 
     if use_interactive:
+        renderer = render_plot_interactive
+        if args.gui:
+            try:
+                from .qt_viewer import render_plot_gui
+            except ModuleNotFoundError as exc:
+                if exc.name != "PySide6" and not (exc.name or "").startswith("PySide6."):
+                    raise
+                parser.error("The Qt viewer requires PySide6. Install it with: pip install '.[gui]'")
+            renderer = render_plot_gui
         print("Launching interactive viewer...")
-        print("Keyboard shortcuts: [n/p]=next/prev result, [j/k]=prev/next step, [x/y/z/g]=component, [t]=tensor reduction, [l]=isolines on/off, [m]=mesh on/off, [+/-/r]=zoom, right-drag or Shift+left-drag=pan, [i]=typed inspect, mouse-left=inspect, [?]=list, [q]=quit")
-        render_plot_interactive(
+        if not args.gui:
+            print("Keyboard shortcuts: [n/p]=next/prev result, [j/k]=prev/next step, [x/y/z/g]=component, [t]=tensor reduction, [l]=isolines on/off, [m]=mesh on/off, [+/-/r]=zoom, right-drag or Shift+left-drag=pan, [i]=typed inspect, mouse-left=inspect, [?]=list, [q]=quit")
+        renderer(
             headers=headers,
             res_path=res_path,
             all_nodes=all_nodes,
@@ -314,7 +337,7 @@ def main():
             initial_component=args.component,
             initial_show_gradient=args.initial_show_gradient,
             initial_show_mesh=args.initial_show_mesh,
-            initial_colormap=args.initial_colormap,
+            initial_colormap=(args.colormap or args.initial_colormap) if args.gui else args.initial_colormap,
             profile_path=profile_path,
             solution_paths=solution_paths,
             initial_show_deformation=args.initial_show_deformation,

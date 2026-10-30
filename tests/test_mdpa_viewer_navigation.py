@@ -27,8 +27,23 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.backend_bases import KeyEvent, MouseEvent
+import numpy as np
 
 from visualize_mdpa_project import (
+    _resolve_constraint_relations,
+    _build_face_separation,
+    _separated_coordinates,
+    _normalize_submodelpart_name,
+    _normal_segments,
+    _stage_from_process_label,
+    _connection_paths,
+    _normal_vector,
+    _resolve_stage_activity,
+    ParsedMdpa,
+    parse_mdpa,
+    parse_mdpa_data,
+    parse_project_parameters,
+    find_mdpa_from_project,
     visualize_mdpa,
 )
 
@@ -529,7 +544,3 @@ End SubModelPart
             self.assertEqual(1, len(exported_files))
             with open(os.path.join(tmp_dir, exported_files[0]), encoding="utf-8") as f:
                 self.assertIn("Node 1", f.read())
-
-
-if __name__ == "__main__":
-    unittest.main()

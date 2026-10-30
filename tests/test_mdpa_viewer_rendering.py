@@ -26,9 +26,24 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backend_bases import KeyEvent, MouseEvent
 import numpy as np
 
 from visualize_mdpa_project import (
+    _resolve_constraint_relations,
+    _build_face_separation,
+    _separated_coordinates,
+    _normalize_submodelpart_name,
+    _normal_segments,
+    _stage_from_process_label,
+    _connection_paths,
+    _normal_vector,
+    _resolve_stage_activity,
+    ParsedMdpa,
+    parse_mdpa,
+    parse_mdpa_data,
+    parse_project_parameters,
+    find_mdpa_from_project,
     visualize_mdpa,
 )
 
@@ -451,7 +466,3 @@ End SubModelPart
                 collection.get_sizes()[0] for collection in circular_collections
             )
             self.assertGreater(circular_sizes[-1], circular_sizes[0])
-
-
-if __name__ == "__main__":
-    unittest.main()

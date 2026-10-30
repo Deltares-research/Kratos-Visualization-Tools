@@ -26,10 +26,22 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backend_bases import KeyEvent, MouseEvent
+import numpy as np
 
 from visualize_mdpa_project import (
+    _resolve_constraint_relations,
+    _build_face_separation,
+    _separated_coordinates,
     _normalize_submodelpart_name,
+    _normal_segments,
     _stage_from_process_label,
+    _connection_paths,
+    _normal_vector,
+    _resolve_stage_activity,
+    ParsedMdpa,
+    parse_mdpa,
+    parse_mdpa_data,
     parse_project_parameters,
     find_mdpa_from_project,
     visualize_mdpa,
@@ -39,6 +51,144 @@ from visualize_mdpa_project import (
 class TestVisualizeMdpaLite(unittest.TestCase):
     def tearDown(self):
         plt.close('all')
+
+    def test_resolve_stage_activity_uses_latest_operation(self):
+        activity = {
+            'Stage1': {
+                'problem_domain': {'Soil', 'Wall'},
+                'operations': [('Wall', False)],
+            },
+            'Stage2': {
+                'problem_domain': {'NewPart'},
+                'operations': [('Wall', True)],
+            },
+            'Stage3': {
+                'problem_domain': set(),
+                'operations': [('Wall', False), ('Wall', True), ('Soil', False)],
+            },
+        }
+
+        self.assertEqual(
+            ({'Soil'}, {'Wall'}),
+            _resolve_stage_activity(['Stage1', 'Stage2', 'Stage3'], activity, 'Stage1'))
+        self.assertEqual(
+            ({'Soil', 'Wall', 'NewPart'}, set()),
+            _resolve_stage_activity(['Stage1', 'Stage2', 'Stage3'], activity, 'Stage2'))
+        self.assertEqual(
+            ({'NewPart', 'Wall'}, {'Soil'}),
+            _resolve_stage_activity(['Stage1', 'Stage2', 'Stage3'], activity, 'Stage3'))
+        self.assertEqual((set(), set()),
+                         _resolve_stage_activity(['Stage1', 'Stage2', 'Stage3'],
+                                                 activity, 'All'))
+
+    def test_process_parts_use_current_stage_and_latest_operation(self):
+        def operation(name, part):
+            return {
+                'name': f'{name}ModelPartOperation',
+                'Parameters': {'model_part_name': f'Domain.{part}'},
+            }
+
+        process = {
+            'process_name': 'ApplyVectorConstraintTableProcess',
+            'Parameters': {
+                'model_part_name_list': ['Domain.Boundary', 'Domain.OffBoundary']},
+        }
+        project = {'stages': {
+            'Stage1': {
+                'solver_settings': {'problem_domain_sub_model_part_list': ['Soil']},
+                'stage_preprocess': {'operations': [
+                    operation('Deactivate', 'OffBoundary')]},
+            },
+            'Stage2': {'stage_settings': {'processes': {
+                'constraints_process_list': [process, {
+                    'process_name': 'ApplyVectorConstraintTableProcess',
+                    'Parameters': {'model_part_name': 'Domain.SingleBoundary'},
+                }]}}},
+            'Stage3': {
+                'stage_preprocess': {'operations': [
+                    operation('Activate', 'OffBoundary')]},
+                'processes': [process],
+            },
+            'Stage4': {},
+        }}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_path = os.path.join(tmp_dir, 'ProjectParameters.json')
+            with open(project_path, 'w', encoding='utf-8') as output:
+                json.dump(project, output)
+            activity = {}
+            _, stages, _ = parse_project_parameters(
+                [project_path], stage_activity=activity)
+
+        self.assertEqual({'Boundary', 'OffBoundary', 'SingleBoundary'},
+                         activity['Stage2']['processes'])
+        self.assertEqual(
+            ({'Soil', 'Boundary', 'SingleBoundary'}, {'OffBoundary'}),
+            _resolve_stage_activity(stages, activity, 'Stage2'))
+        self.assertEqual(
+            ({'Soil', 'Boundary', 'OffBoundary'}, set()),
+            _resolve_stage_activity(stages, activity, 'Stage3'))
+        self.assertEqual(
+            ({'Soil'}, set()),
+            _resolve_stage_activity(stages, activity, 'Stage4'))
+
+    def test_stage_activity_partitions_all_referenced_parts(self):
+        stages = ['Before', 'Selected']
+        activity = {
+            'Before': {
+                'problem_domain': {'Soil'},
+                'operations': [('OffPart', False), ('ReactivatedPart', False)],
+            },
+            'Selected': {
+                'operations': [('ReactivatedPart', True)],
+                'processes': {'Boundary'},
+            },
+        }
+        references = {'ModelerPart', 'OffPart', 'ReactivatedPart'}
+        active, deactivated = _resolve_stage_activity(
+            stages, activity, 'Selected', referenced_submodels=references)
+        all_parts = {'Soil', 'Boundary'} | references
+        self.assertEqual({'OffPart'}, deactivated)
+        self.assertEqual(all_parts - deactivated, active)
+        self.assertFalse(active & deactivated)
+        self.assertEqual(all_parts, active | deactivated)
+
+    def test_project_parser_collects_configured_constraint_roles(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, 'ProjectParameters_stage_2.json')
+            with open(path, 'w', encoding='utf-8') as output:
+                json.dump({'processes': [{'process_name': 'Constraints', 'Parameters': {
+                    'master_model_part_name': 'Domain.Source',
+                    'slave_model_part_name': 'Domain.Target'}}]}, output)
+            relations = []
+            parse_project_parameters([path], constraint_relations=relations)
+            self.assertEqual([('Domain.Source', 'Domain.Target', 'stage_2')], relations)
+
+    def test_stage_preprocess_constraints_preserve_roles_and_stage(self):
+        nodes = {1: (0, 0, 0), 10: (0, 0, 0), 2: (1, 2, 0), 3: (2, 0, 0)}
+        parsed = ParsedMdpa(nodes, {'Master': {10}, 'Slave': {1}}, [], {}, [
+            ('Elements', 'UPwSmallStrainElement2D3N', 1, (1, 2, 3))])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_path = os.path.join(tmp_dir, 'ProjectParameters.json')
+            with open(project_path, 'w', encoding='utf-8') as output:
+                json.dump({'stages': {'Before': {'stage_preprocess': {
+                    key: [{'name': 'Constraints', 'Parameters': {
+                        'master_model_part_name': 'Domain.Master',
+                        'slave_model_part_name': 'Domain.Slave'}}]
+                    for key in ('operations', 'modelers')
+                }}}}, output)
+            relations = []
+            mapping, stages, references = parse_project_parameters(
+                [project_path], constraint_relations=relations)
+            self.assertEqual([('Domain.Master', 'Domain.Slave', 'Before')], relations)
+            self.assertEqual(['Before'], stages)
+            self.assertEqual({'Master', 'Slave'}, references['Before'])
+            self.assertIn('Master', mapping)
+            self.assertIn('Slave', mapping)
+            _, _, directions, issues = _build_face_separation(parsed, relations)
+            displayed = _separated_coordinates(nodes, directions, 0.1)
+            self.assertEqual(nodes[10], displayed[10])
+            self.assertNotEqual(nodes[1], displayed[1])
+            self.assertEqual({}, issues)
 
     def test_parse_project_parameters_extracts_stage_names_and_model_parts(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -513,7 +663,3 @@ End SubModelPart
                 "Recovered stage names from JSON 'stages' blocks: DictStage, NamedStage, StageName, IdStage, stage_4, stage_5",
                 printed,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

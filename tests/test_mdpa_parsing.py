@@ -13,10 +13,12 @@ Please perform independent review, validation, and testing before use.
 ====================================================================
 """
 
+import json
 import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -24,14 +26,25 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.backend_bases import KeyEvent, MouseEvent
+import numpy as np
 
 from visualize_mdpa_project import (
+    _resolve_constraint_relations,
+    _build_face_separation,
+    _separated_coordinates,
+    _normalize_submodelpart_name,
     _normal_segments,
+    _stage_from_process_label,
     _connection_paths,
     _normal_vector,
+    _resolve_stage_activity,
     ParsedMdpa,
     parse_mdpa,
     parse_mdpa_data,
+    parse_project_parameters,
+    find_mdpa_from_project,
+    visualize_mdpa,
 )
 
 
@@ -51,6 +64,13 @@ class TestVisualizeMdpaLite(unittest.TestCase):
 End Nodes
 
 Begin SubModelPart Soil
+    Begin SubModelPartTables
+    End SubModelPartTables
+    Begin SubModelPartData
+    End SubModelPartData
+    Begin SubModelPartProperties
+        1
+    End SubModelPartProperties
   Begin SubModelPartNodes
     1
     2
@@ -58,6 +78,11 @@ Begin SubModelPart Soil
 End SubModelPart
 
 Begin SubModelPart Structure.Wall
+    Begin SubModelPartTables
+    End SubModelPartTables
+    Begin SubModelPartProperties
+        2
+    End SubModelPartProperties
   Begin SubModelPartNodes
     2
     3
@@ -183,10 +208,6 @@ End Elements
 
     def test_kratos_connection_paths_follow_geometry_node_order(self):
         self.assertEqual(
-            [(1, 3, 2)],
-            _connection_paths("LinearTimoshenkoCurvedBeamElement2D3N", (1, 2, 3)),
-        )
-        self.assertEqual(
             [(1, 4, 2, 5, 3, 6, 1)],
             _connection_paths("SmallStrainUPwDiffOrderElement2D6N", (1, 2, 3, 4, 5, 6)),
         )
@@ -205,6 +226,44 @@ End Elements
             [(1, 2)],
             _connection_paths("LinearCondition2D2N", (1, 2)),
         )
+
+    def test_kratos_connection_paths_close_four_node_quadrilateral(self):
+        self.assertEqual(
+            [(11, 22, 33, 44, 11)],
+            _connection_paths("SmallStrainUPwElement2D4N", (11, 22, 33, 44)),
+        )
+
+    def test_connection_paths_use_explicit_three_node_geometries(self):
+        cases = {
+            "LinearTimoshenkoCurvedBeamElement2D3N": [(1, 3, 2)],
+            "LineLoadDiffOrderCondition2D3N": [(1, 3, 2)],
+            "LineNormalLoadDiffOrderCondition2D3N": [(1, 3, 2)],
+            "LineCondition2D3N": [(1, 3, 2)],
+            "TransientPwElement2D3N": [(1, 2, 3, 1)],
+            "SteadyStatePwElement2D3N": [(1, 2, 3, 1)],
+            "TransientPwLineElement2D3N": [(1, 3, 2)],
+            "UPwSmallStrainElement2D3N": [(1, 2, 3, 1)],
+            "UPwSmallStrainFICElement2D3N": [(1, 2, 3, 1)],
+            "UPwSmallStrainAxisymmetricElement2D3N": [(1, 2, 3, 1)],
+            "UPwSmallStrainAxisymmetricFICElement2D3N": [(1, 2, 3, 1)],
+            "UPwUpdatedLagrangianElement2D3N": [(1, 2, 3, 1)],
+            "UPwUpdatedLagrangianFICElement2D3N": [(1, 2, 3, 1)],
+            "UPwUpdatedLagrangianAxisymmetricElement2D3N": [(1, 2, 3, 1)],
+            "UPwUpdatedLagrangianAxisymmetricFICElement2D3N": [(1, 2, 3, 1)],
+            "GeoTransientThermalElement2D3N": [(1, 2, 3, 1)],
+            "GeoTransientThermalLineElement2D3N": [(1, 3, 2)],
+            "Element2D3N": [(1, 2, 3, 1)],
+        }
+        for entity_type, expected in cases.items():
+            for spelling in (entity_type, entity_type.lower()):
+                with self.subTest(entity_type=spelling):
+                    self.assertEqual(expected, _connection_paths(spelling, (1, 2, 3)))
+
+    def test_connection_paths_reject_unknown_three_node_geometry(self):
+        for entity_type in ("UnknownElement2D3N", "UnknownBeamElement2D3N"):
+            with self.subTest(entity_type=entity_type):
+                with self.assertRaisesRegex(ValueError, "Unknown geometry"):
+                    _connection_paths(entity_type, (1, 2, 3))
 
     def test_kratos_normal_segments_cover_line_and_interface_sides(self):
         self.assertEqual(
@@ -226,7 +285,3 @@ End Elements
                 (1, 2, 3, 4, 5, 6),
             ),
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

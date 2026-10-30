@@ -17,14 +17,19 @@ from matplotlib.widgets import Button, CheckButtons, Slider, TextBox
 import numpy as np
 
 from .mdpa import (
+    _build_face_separation,
     _connection_paths,
     _normalize_submodelpart_name,
     _normal_segments,
     _normal_vector,
+    _resolve_constraint_relations,
+    _separated_coordinates,
+    _separation_paths,
     _stage_from_process_label,
     parse_mdpa_data,
 )
-from .project import parse_project_parameters
+from .project import _resolve_stage_activity, parse_project_parameters
+
 
 def visualize_mdpa(mdpa_path, project_paths):
     """Create interactive matplotlib visualization of SubModelParts."""
@@ -34,6 +39,8 @@ def visualize_mdpa(mdpa_path, project_paths):
     connections = parsed_mdpa.connections
     entity_submodels = parsed_mdpa.entity_submodels
     entity_records = parsed_mdpa.entity_records
+    constraint_relations = []
+    stage_activity = {}
     mdpa_dir = os.path.dirname(os.path.abspath(mdpa_path))
     mdpa_stem = os.path.splitext(os.path.basename(mdpa_path))[0]
 
@@ -121,7 +128,10 @@ def visualize_mdpa(mdpa_path, project_paths):
             print(f"Auto-detected project file(s): {', '.join(project_paths)}")
 
     if project_paths:
-        processes_map, stage_names, stage_referenced_submodels = parse_project_parameters(project_paths, base_dir=mdpa_dir)
+        processes_map, stage_names, stage_referenced_submodels = parse_project_parameters(
+            project_paths, base_dir=mdpa_dir, constraint_relations=constraint_relations,
+            stage_activity=stage_activity
+        )
 
         # Resilient fallback: if stage-tagged process extraction misses stage names,
         # read them directly from top-level "stages" blocks.
@@ -178,6 +188,9 @@ def visualize_mdpa(mdpa_path, project_paths):
     else:
         processes_map, stage_names, stage_referenced_submodels = {}, [], {}
     
+    constraint_relations = _resolve_constraint_relations(
+        constraint_relations, submodel_nodes)
+
     print(f"\n{'='*70}")
     print(f"MDPA Visualization")
     print(f"{'='*70}")
@@ -378,18 +391,29 @@ def visualize_mdpa(mdpa_path, project_paths):
     # We'll draw nodes via a helper so we can keep marker sizes constant in screen
     # space. Store patches we create so they can be removed and redrawn on zoom/pan.
     node_patches = []
-    hidden_submodels = set()
+    checkbox_state = {name: True for name in subnames}
 
     # Desired marker size in points (matplotlib points; 1 point = 1/72 inch)
     marker_point_size = 6.0
     selected_stage = 'All'
-    stage_inactive_submodels = set()
+    stage_active_submodels = set()
+    stage_deactivated_submodels = set()
+    stage_all_submodels = set()
+    visualize_mode = 'all'
     mesh_visible = False
     mesh_artists = []
     normals_visible = False
     normal_artists = []
     normal_length_scale = 1.0
     equal_aspect = False
+    incident_entities, face_pairs, separation_normals, separation_issues = _build_face_separation(
+        parsed_mdpa, constraint_relations
+    )
+    display_nodes = dict(nodes)
+    separation_enabled = False
+    separation_gap = 0.002 * max(dx, dy)
+    diagnostic_artists = []
+    inspection = {'node': None, 'labels': True}
 
     def _get_processes_for_submodel(submodel_name):
         """Lookup process labels by exact or normalized SubModelPart name."""
@@ -399,27 +423,47 @@ def visualize_mdpa(mdpa_path, project_paths):
         return processes_map.get(_normalize_submodelpart_name(submodel_name), [])
 
     def _rebuild_stage_activity():
-        stage_inactive_submodels.clear()
+        nonlocal stage_active_submodels, stage_deactivated_submodels
+        nonlocal stage_all_submodels
         if selected_stage == 'All':
+            stage_active_submodels.clear()
+            stage_deactivated_submodels.clear()
+            stage_all_submodels.clear()
             return
 
         # Primary source: all SubModelParts referenced by selected stage
         # (processes, operations/modelers, and stage domain lists).
         referenced_for_stage = stage_referenced_submodels.get(selected_stage, set())
         if referenced_for_stage:
-            for name in subnames:
-                if _normalize_submodelpart_name(name) not in referenced_for_stage:
-                    stage_inactive_submodels.add(name)
-            return
+            referenced_submodels = {
+                name for name in subnames
+                if _normalize_submodelpart_name(name) in referenced_for_stage
+            }
+        else:
+            # Fallback when no stage-tagged references were collected.
+            referenced_submodels = {
+                name for name in subnames
+                if any(_stage_from_process_label(p) == selected_stage
+                       for p in _get_processes_for_submodel(name))
+            }
 
-        # Fallback when no stage-tagged references were collected.
-        for name in subnames:
-            procs = _get_processes_for_submodel(name)
-            if not any(_stage_from_process_label(p) == selected_stage for p in procs):
-                stage_inactive_submodels.add(name)
+        stage_active_submodels, stage_deactivated_submodels = _resolve_stage_activity(
+            stage_names, stage_activity, selected_stage,
+            referenced_submodels=referenced_submodels,
+        )
+        stage_all_submodels = stage_active_submodels | stage_deactivated_submodels
 
-    def _is_active_for_selected_stage(submodel_name):
-        return submodel_name not in stage_inactive_submodels
+    def _is_submodelpart_visualized(submodel_name):
+        return checkbox_state[submodel_name] and _matches_visualize_mode(submodel_name)
+
+    def _matches_visualize_mode(submodel_name):
+        if selected_stage == 'All':
+            return True
+        if visualize_mode == 'all':
+            return submodel_name in stage_all_submodels
+        if visualize_mode == 'activated':
+            return submodel_name in stage_active_submodels
+        return submodel_name in stage_deactivated_submodels
 
     def _make_wedge_path(theta2, theta1, nsteps=12):
         # Create a wedge (sector) path in marker coordinate space (radius=1)
@@ -455,14 +499,21 @@ def visualize_mdpa(mdpa_path, project_paths):
             for i, sname in enumerate(subs_sorted):
                 segmented_groups[(nseg, i, sname, size_scale, alpha, zorder)].append((x, y))
 
-        for key, group in xy_groups.items():
+        render_groups = xy_groups
+        if separation_enabled:
+            render_groups = {}
+            for node_id in node_ids:
+                coordinate = display_nodes[node_id][:2]
+                render_groups.setdefault(coordinate, {'node_ids': []})['node_ids'].append(node_id)
+        for key, group in render_groups.items():
             x, y = key
             node_ids_in_group = sorted(group['node_ids'])
 
             if len(node_ids_in_group) == 1:
                 # Single node at this coordinate: keep the existing simple circle.
                 nid = node_ids_in_group[0]
-                subs = [s for s in node_to_subs.get(nid, []) if s not in hidden_submodels]
+                subs = [s for s in node_to_subs.get(nid, [])
+                        if _is_submodelpart_visualized(s)]
                 if not subs:
                     continue
                 if len(subs) == 1:
@@ -481,7 +532,8 @@ def visualize_mdpa(mdpa_path, project_paths):
                     # Deeper/larger layers must stay below upper/smaller layers.
                     zorder = 3 - stack_level * 0.01
 
-                    subs = [s for s in node_to_subs.get(nid, []) if s not in hidden_submodels]
+                    subs = [s for s in node_to_subs.get(nid, [])
+                            if _is_submodelpart_visualized(s)]
                     if not subs:
                         continue
                     if len(subs) == 1:
@@ -545,7 +597,7 @@ def visualize_mdpa(mdpa_path, project_paths):
 
         active_node_ids = {
             nid for nid, memberships in node_to_subs.items()
-            if any(name not in hidden_submodels for name in memberships)
+            if any(_is_submodelpart_visualized(name) for name in memberships)
         }
         for entity_type, node_ids_in_connection in connections:
             for path in _connection_paths(entity_type, node_ids_in_connection):
@@ -553,8 +605,8 @@ def visualize_mdpa(mdpa_path, project_paths):
                     continue
                 if not all(nid in nodes and nid in active_node_ids for nid in path):
                     continue
-                xs = [nodes[nid][0] for nid in path]
-                ys = [nodes[nid][1] for nid in path]
+                xs = [display_nodes[nid][0] for nid in path]
+                ys = [display_nodes[nid][1] for nid in path]
                 (line,) = ax.plot(xs, ys, color='black', linewidth=0.8, zorder=1)
                 mesh_artists.append(line)
 
@@ -570,7 +622,7 @@ def visualize_mdpa(mdpa_path, project_paths):
         for block_type, entity_type, entity_id, node_ids_in_entity in entity_records:
             memberships = entity_submodels.get((block_type, entity_id), set())
             active_memberships = [
-                name for name in memberships if name not in hidden_submodels
+                name for name in memberships if _is_submodelpart_visualized(name)
             ]
             if not active_memberships:
                 continue
@@ -583,8 +635,8 @@ def visualize_mdpa(mdpa_path, project_paths):
                 continue
             for submodel_name in active_memberships:
                 for segment in segments:
-                    start = nodes.get(segment[0])
-                    end = nodes.get(segment[-1])
+                    start = display_nodes.get(segment[0])
+                    end = display_nodes.get(segment[-1])
                     if start is None or end is None:
                         continue
                     normal = _normal_vector(start, end, normal_length)
@@ -600,13 +652,120 @@ def visualize_mdpa(mdpa_path, project_paths):
                     )
                     normal_artists.append(vector)
 
-    # Initial draw
-    draw_nodes()
-    # Request a single canvas update now that patches are created
-    fig.canvas.draw_idle()
+    def _visible_node(node_id):
+        return any(_is_submodelpart_visualized(name)
+                   for name in node_to_subs.get(node_id, []))
+
+    interface_nodes = {
+        (block, entity_id): connected
+        for block, entity_type, entity_id, connected in entity_records
+        if any(name in entity_type.lower() for name in ('2plus2n', '3plus3n'))
+    }
+
+    def _interface_visible(entity_key):
+        memberships = entity_submodels.get(entity_key, set())
+        return (
+            entity_key in interface_nodes
+            and (not memberships or any(_is_submodelpart_visualized(name)
+                                        for name in memberships))
+            and all(_visible_node(node_id) for node_id in interface_nodes[entity_key])
+        )
+
+    def _relationship_usage(relationship):
+        visible_interfaces = {
+            entity_key for entity_key in relationship['interfaces']
+            if _interface_visible(entity_key)
+        }
+        constraints = [entry for entry in relationship['constraints']
+                       if selected_stage == 'All' or entry[0] in (selected_stage, 'Global')]
+        constraints = [entry for entry in constraints
+                       if _is_submodelpart_visualized(entry[1])
+                       and _is_submodelpart_visualized(entry[2])]
+        return visible_interfaces, constraints
+
+    def draw_diagnostics():
+        for artist in diagnostic_artists:
+            artist.remove()
+        diagnostic_artists.clear()
+        if separation_enabled:
+            conflicting = [
+                node_id for node_id, diagnostics in separation_issues.items()
+                if 'Conflicting visible interface directions; node left fixed' in diagnostics
+                and _visible_node(node_id)
+            ]
+            if conflicting:
+                markers = ax.scatter([display_nodes[node][0] for node in conflicting],
+                                     [display_nodes[node][1] for node in conflicting],
+                                     marker='x', color='#c23b32', s=80, zorder=7)
+                diagnostic_artists.append(markers)
+            for (reference, duplicate), relationship in face_pairs.items():
+                interfaces, constraints = _relationship_usage(relationship)
+                if not (interfaces or constraints) or not (_visible_node(reference) and _visible_node(duplicate)):
+                    continue
+                start, end = display_nodes[reference], display_nodes[duplicate]
+                color = '#b64b24' if interfaces else '#167d8d'
+                (link,) = ax.plot([start[0], end[0]], [start[1], end[1]],
+                                  linestyle='--', color=color, linewidth=0.9, zorder=4)
+                diagnostic_artists.append(link)
+        selected = inspection['node']
+        if selected is None:
+            return
+        counterparts = xy_to_node_ids[node_xy[selected]]
+        local_entities = {}
+        for node_id in counterparts:
+            for record in incident_entities.get(node_id, []):
+                local_entities[(record[0], record[2])] = record
+        local_nodes = set(counterparts)
+        for entity_key, record in local_entities.items():
+            block, entity_type, entity_id, connected = record
+            memberships = entity_submodels.get(entity_key, set())
+            if ((memberships and not any(_is_submodelpart_visualized(name)
+                                         for name in memberships))
+                    or not any(_visible_node(node) for node in connected)):
+                continue
+            local_nodes.update(connected)
+            for path in _separation_paths(
+                    block, entity_type, entity_id, connected, separation_issues):
+                (line,) = ax.plot([display_nodes[node][0] for node in path],
+                                  [display_nodes[node][1] for node in path],
+                                  color='#c23b32', linewidth=1.5, alpha=0.7, zorder=3.5)
+                diagnostic_artists.append(line)
+            if inspection['labels']:
+                center = np.mean([display_nodes[node][:2] for node in connected], axis=0)
+                offset = (3, 3)
+                if '2plus2n' in entity_type.lower() or '3plus3n' in entity_type.lower():
+                    offset = (-28, -26)
+                elif 'beam' in entity_type.lower() or 'line' in entity_type.lower():
+                    offset = (-28, 24)
+                label = ax.annotate(f'{block[0]}{entity_id}', center, fontsize=8,
+                                    color='#943329', xytext=offset, textcoords='offset points',
+                                    clip_on=True, zorder=6)
+                diagnostic_artists.append(label)
+        if inspection['labels']:
+            for node_id in sorted(local_nodes):
+                if not _visible_node(node_id):
+                    continue
+                offset = (4, 8) if display_nodes[node_id][1] > nodes[node_id][1] else (4, -10)
+                label = ax.annotate(str(node_id), display_nodes[node_id][:2], fontsize=8,
+                                    xytext=offset, textcoords='offset points',
+                                    clip_on=True, zorder=6)
+                diagnostic_artists.append(label)
+        flagged = [node_id for node_id in local_nodes if node_id in separation_issues and _visible_node(node_id)]
+        if flagged:
+            markers = ax.scatter([display_nodes[node][0] for node in flagged],
+                                 [display_nodes[node][1] for node in flagged],
+                                 marker='x', color='#c23b32', s=80, zorder=7)
+            diagnostic_artists.append(markers)
+
+    def _redraw_scene():
+        draw_nodes()
+        draw_mesh()
+        draw_normals()
+        draw_diagnostics()
+        fig.canvas.draw_idle()
 
     # Add top-bar controls above the Find box.
-    save_plot_ax = fig.add_axes([0.86, 0.885, 0.13, 0.03])
+    save_plot_ax = fig.add_axes([0.925, 0.885, 0.065, 0.03])
     save_plot_btn = Button(save_plot_ax, 'Save plot', hovercolor='0.975')
 
     def _save_plot(_event):
@@ -646,7 +805,7 @@ def visualize_mdpa(mdpa_path, project_paths):
 
     normals_btn.on_clicked(_toggle_normals)
 
-    aspect_btn_ax = fig.add_axes([0.72, 0.885, 0.13, 0.03])
+    aspect_btn_ax = fig.add_axes([0.72, 0.885, 0.08, 0.03])
     aspect_btn = Button(aspect_btn_ax, 'Aspect: free', hovercolor='0.975')
 
     def _toggle_aspect(_event):
@@ -657,6 +816,23 @@ def visualize_mdpa(mdpa_path, project_paths):
         fig.canvas.draw_idle()
 
     aspect_btn.on_clicked(_toggle_aspect)
+
+    visualize_btn_ax = fig.add_axes([0.805, 0.885, 0.115, 0.03])
+    visualize_btn = Button(visualize_btn_ax, 'Visualize: all', hovercolor='0.975')
+
+    def _cycle_visualize_mode(_event):
+        nonlocal visualize_mode
+        modes = ('all', 'activated', 'deactivated')
+        visualize_mode = modes[(modes.index(visualize_mode) + 1) % len(modes)]
+        labels = {
+            'all': 'Visualize: all',
+            'activated': 'Visualize: active',
+            'deactivated': 'Visualize: deactivated',
+        }
+        visualize_btn.label.set_text(labels[visualize_mode])
+        _refresh_view(rebuild_separation=True)
+
+    visualize_btn.on_clicked(_cycle_visualize_mode)
 
     normal_decrease_ax = fig.add_axes([0.72, 0.92, 0.085, 0.03])
     normal_increase_ax = fig.add_axes([0.81, 0.92, 0.085, 0.03])
@@ -679,13 +855,108 @@ def visualize_mdpa(mdpa_path, project_paths):
         nonlocal marker_point_size
         marker_point_size = _clamp_marker_size(marker_point_size + delta)
         print(f"Marker size set to {marker_point_size} pt")
-        draw_nodes()
-        draw_mesh()
-        draw_normals()
-        fig.canvas.draw_idle()
+        _redraw_scene()
 
     decrease_btn.on_clicked(lambda _event: _change_marker_size(-1.0))
     increase_btn.on_clicked(lambda _event: _change_marker_size(1.0))
+
+    separated_ax = fig.add_axes([0.07, 0.015, 0.14, 0.032])
+    separated_btn = Button(separated_ax, 'Separated Faces', hovercolor='0.95')
+    separation_inactive_color = '#e6e6e6'
+    separation_active_color = '#a8d5a2'
+    separated_btn.color = separation_inactive_color
+    separated_ax.set_facecolor(separation_inactive_color)
+    gap_decrease_ax = fig.add_axes([0.23, 0.015, 0.065, 0.032])
+    gap_increase_ax = fig.add_axes([0.30, 0.015, 0.065, 0.032])
+    gap_decrease_btn = Button(gap_decrease_ax, 'Gap -', hovercolor='0.95')
+    gap_increase_btn = Button(gap_increase_ax, 'Gap +', hovercolor='0.95')
+    gap_value_ax = fig.add_axes([0.41, 0.015, 0.11, 0.032])
+    gap_value = TextBox(gap_value_ax, 'Gap ', initial=str(separation_gap))
+    node_lookup_ax = fig.add_axes([0.57, 0.015, 0.11, 0.032])
+    node_lookup = TextBox(node_lookup_ax, 'Node ID ', initial='')
+    labels_ax = fig.add_axes([0.72, 0.015, 0.13, 0.032])
+    labels_btn = Button(labels_ax, 'Local labels: on', hovercolor='0.95')
+
+    def _refresh_view(*, rebuild_separation=False):
+        if rebuild_separation:
+            _update_visible_separation()
+        display_nodes.update(_separated_coordinates(
+            nodes, separation_normals, separation_gap if separation_enabled else 0.0))
+        node_coords[:] = np.array([display_nodes[node_id] for node_id in node_ids])
+        _redraw_scene()
+
+    def _update_visible_separation():
+        nonlocal separation_normals, separation_issues
+        visible_interfaces = {
+            entity_key for entity_key in interface_nodes
+            if _interface_visible(entity_key)
+        }
+        visible_constraints = [
+            (master, slave, stage) for master, slave, stage in constraint_relations
+            if _is_submodelpart_visualized(master) and _is_submodelpart_visualized(slave)
+            and (selected_stage == 'All' or stage in (selected_stage, 'Global'))
+        ]
+        _, _, separation_normals, separation_issues = _build_face_separation(
+            parsed_mdpa, visible_constraints, visible_interfaces=visible_interfaces
+        )
+
+    def _toggle_separation(_event):
+        nonlocal separation_enabled
+        separation_enabled = not separation_enabled
+        separated_btn.color = (
+            separation_active_color if separation_enabled else separation_inactive_color
+        )
+        separated_ax.set_facecolor(separated_btn.color)
+        _refresh_view(rebuild_separation=separation_enabled)
+        if separation_enabled:
+            print(f'Separated Faces: {len(face_pairs)} candidate pairs; '
+                  f'{len(separation_issues)} nodes with diagnostics. Display-only gap {separation_gap:g}.')
+
+    def _set_separation_gap(value):
+        nonlocal separation_gap
+        if not np.isfinite(value) or value <= 0:
+            print('Gap must be a positive finite number.')
+            return
+        eventson = gap_value.eventson
+        gap_value.eventson = False
+        try:
+            gap_value.set_val(str(value))
+        finally:
+            gap_value.eventson = eventson
+        if value == separation_gap:
+            return
+        separation_gap = value
+        if separation_enabled:
+            _refresh_view()
+        else:
+            fig.canvas.draw_idle()
+
+    def _submit_separation_gap(text):
+        try:
+            value = float(text.strip())
+        except ValueError:
+            print('Gap must be a positive finite number.')
+            return
+        _set_separation_gap(value)
+
+    def _toggle_local_labels(_event):
+        inspection['labels'] = not inspection['labels']
+        labels_btn.label.set_text('Local labels: on' if inspection['labels'] else 'Local labels: off')
+        draw_diagnostics()
+        fig.canvas.draw_idle()
+
+    separated_btn.on_clicked(_toggle_separation)
+    gap_decrease_btn.on_clicked(lambda _event: _set_separation_gap(separation_gap / 1.1))
+    gap_increase_btn.on_clicked(lambda _event: _set_separation_gap(separation_gap * 1.1))
+    gap_value.on_submit(_submit_separation_gap)
+    labels_btn.on_clicked(_toggle_local_labels)
+    fig._mdpa_diagnostic_widgets = {
+        'separated_faces': separated_btn,
+        'visualize': visualize_btn,
+        'gap_decrease': gap_decrease_btn, 'gap_increase': gap_increase_btn,
+        'gap_value': gap_value,
+        'node_id': node_lookup, 'labels': labels_btn,
+    }
 
     # Panel controls: search + bulk visibility operations + checkbox list.
     search_ax = fig.add_axes([0.74, 0.84, 0.25, 0.03])
@@ -735,6 +1006,8 @@ def visualize_mdpa(mdpa_path, project_paths):
 
     def _render_stage_widget():
         nonlocal stage_selector
+        if stage_selector is not None and hasattr(stage_selector, 'disconnect_events'):
+            stage_selector.disconnect_events()
         stage_ax.cla()
         stage_ax.set_title('Stage', fontsize=8)
         page_options = _current_stage_page_options()
@@ -782,7 +1055,6 @@ def visualize_mdpa(mdpa_path, project_paths):
     checks_ax.set_title('Visible SubModelParts', fontsize=8)
     checks_scroll_ax.set_title('', fontsize=8)
 
-    checkbox_state = {name: True for name in subnames}
     filter_query = ''
     filter_query_lower = ''
     suppress_checkbox_callback = {'value': False}
@@ -828,7 +1100,6 @@ def visualize_mdpa(mdpa_path, project_paths):
             name = lbl.get_text()
             color = _color_for_submodel(name)
             match = _matches_filter(name)
-            is_active = checkbox_state[name]
 
             lbl.set_fontsize(7)
             lbl.set_color(color)
@@ -851,15 +1122,7 @@ def visualize_mdpa(mdpa_path, project_paths):
                     line.set_color(color)
                     line.set_linewidth(1.5)
 
-    def _sync_hidden_from_checkbox_state():
-        hidden_submodels.clear()
-        for name, is_active in checkbox_state.items():
-            if not is_active:
-                hidden_submodels.add(name)
-
     def _set_checkbox_state(name, visible):
-        if checkbox_state[name] == visible:
-            return
         checkbox_state[name] = visible
 
         # If the entry is on current page, keep the widget in sync.
@@ -876,6 +1139,8 @@ def visualize_mdpa(mdpa_path, project_paths):
 
     def _render_checks_widget():
         nonlocal visibility_checks, rectangles, lines
+        if visibility_checks is not None and hasattr(visibility_checks, 'disconnect_events'):
+            visibility_checks.disconnect_events()
         checks_ax.cla()
         checks_ax.set_title('Visible SubModelParts', fontsize=8)
 
@@ -891,24 +1156,18 @@ def visualize_mdpa(mdpa_path, project_paths):
     def _toggle_submodel_visibility(label):
         if suppress_checkbox_callback['value']:
             return
-        checkbox_state[label] = not checkbox_state[label]
-        _sync_hidden_from_checkbox_state()
+        target = not checkbox_state[label]
+        _set_checkbox_state(label, target)
         _set_checkbox_visuals()
-        draw_nodes()
-        draw_mesh()
-        draw_normals()
-        fig.canvas.draw_idle()
+        _refresh_view(rebuild_separation=True)
 
     def _apply_bulk(action):
         changed = False
         affected = 0
         for name in subnames:
-            # Invert acts on the current checkbox choices globally.
-            # Show/Hide operate only on submodels active for selected stage.
-            if action != 'invert' and not _is_active_for_selected_stage(name):
+            # Invert is global; Show/Hide follow the Visualize mode and Find.
+            if action != 'invert' and not _matches_visualize_mode(name):
                 continue
-            # Invert is global by design: swap visible/hidden for all entries.
-            # Show/Hide apply to current Find matches.
             if action != 'invert' and not _matches_filter(name):
                 continue
             affected += 1
@@ -922,12 +1181,8 @@ def visualize_mdpa(mdpa_path, project_paths):
                 _set_checkbox_state(name, target)
                 changed = True
         if changed:
-            _sync_hidden_from_checkbox_state()
             _render_checks_widget()
-            draw_nodes()
-            draw_mesh()
-            draw_normals()
-            fig.canvas.draw_idle()
+            _refresh_view(rebuild_separation=True)
         if action == 'invert':
             print(f"Bulk action 'invert' applied globally to {affected} SubModelParts.")
         elif filter_query:
@@ -1060,26 +1315,15 @@ def visualize_mdpa(mdpa_path, project_paths):
         selected_stage = label
         _rebuild_stage_activity()
 
-        # Apply selected stage using the same mechanism as Hide/Show:
-        # active submodels => checked (visible), inactive => unchecked (hidden).
-        changed = False
-        for name in subnames:
-            target = _is_active_for_selected_stage(name)
-            if checkbox_state[name] != target:
-                _set_checkbox_state(name, target)
-                changed = True
-        # Always re-sync hidden-state from checkboxes after stage application
-        # to avoid stale visibility when no toggle event is emitted.
-        _sync_hidden_from_checkbox_state()
-
         _render_stage_widget()
-        _render_checks_widget()
-        draw_nodes()
-        draw_mesh()
-        draw_normals()
-        fig.canvas.draw_idle()
-        active_count = sum(1 for n in subnames if _is_active_for_selected_stage(n))
-        print(f"Selected stage: {selected_stage} ({active_count} active SubModelParts)")
+        _refresh_view(rebuild_separation=True)
+        if selected_stage == 'All':
+            print(f"Selected stage: All ({len(subnames)} SubModelParts; no activity filter)")
+        else:
+            active_count = sum(name in stage_active_submodels for name in subnames)
+            deactivated_count = sum(name in stage_deactivated_submodels for name in subnames)
+            print(f"Selected stage: {selected_stage} "
+                  f"({active_count} active, {deactivated_count} deactivated SubModelParts)")
 
     # Apply filter live while typing and also on Enter.
     search_box.on_text_change(_on_search_changed)
@@ -1096,6 +1340,7 @@ def visualize_mdpa(mdpa_path, project_paths):
     _rebuild_stage_activity()
     _render_stage_widget()
     _render_checks_widget()
+    _refresh_view(rebuild_separation=True)
     
     ax.set_xlabel('X coordinate')
     ax.set_ylabel('Y coordinate')
@@ -1455,6 +1700,9 @@ def visualize_mdpa(mdpa_path, project_paths):
         tol = 0.01 * max(ax.get_xlim()[1] - ax.get_xlim()[0], ax.get_ylim()[1] - ax.get_ylim()[0])
         if distances[closest_idx] > tol:
             return
+        _inspect_node(closest_idx, zoom=getattr(event, 'dblclick', False))
+
+    def _inspect_node(closest_idx, zoom=False):
         last_selected['idx'] = closest_idx
         if zoom_state['node_idx'] != closest_idx:
             zoom_state['node_idx'] = None
@@ -1463,18 +1711,48 @@ def visualize_mdpa(mdpa_path, project_paths):
             zoom_state['level'] = 0
         
         nid = node_ids[closest_idx]
+        inspection['node'] = nid
+        draw_diagnostics()
+        fig.canvas.draw_idle()
         coincident_ids = sorted(xy_to_node_ids.get(node_xy[nid], [nid]))
         containing_all = [name for name, nset in submodel_nodes.items() if nid in nset]
-        # Report what is currently visible on plot first (same logic as rendering).
-        containing = [name for name in containing_all if name not in hidden_submodels]
+        # Prefer manually selected memberships, retaining all as a fallback.
+        containing = [name for name in containing_all if checkbox_state[name]]
         if not containing:
             containing = containing_all
-        msg = f"\nNode {nid} @ ({node_coords[closest_idx, 0]:.2f}, {node_coords[closest_idx, 1]:.2f})\n"
+        msg = f"\nNode {nid} @ ({nodes[nid][0]:.2f}, {nodes[nid][1]:.2f})\n"
+        if separation_enabled:
+            msg += f"Display coordinates: {display_nodes[nid]} (display-only gap {separation_gap:g})\n"
         msg += f"Coincident node ids (same XY): {', '.join(str(i) for i in coincident_ids)}\n"
         msg += f"SubModelParts: {', '.join(containing) or 'None'}\n"
+        msg += f"Selected stage: {selected_stage}\n"
+        msg += '\nIncident connectivity (MDPA, including hidden entities):\n'
+        for other_nid in coincident_ids:
+            msg += f'Node {other_nid}, original XYZ {nodes[other_nid]}:\n'
+            for block, entity_type, entity_id, connected in incident_entities.get(other_nid, []):
+                memberships = sorted(entity_submodels.get((block, entity_id), set()))
+                msg += f"  {block} {entity_id}: {entity_type}; nodes {connected}; parts {', '.join(memberships) or 'None'}\n"
+            for diagnostic in sorted(separation_issues.get(other_nid, set())):
+                msg += f'  Diagnostic: {diagnostic}\n'
+        msg += '\nPair relationships (stage references, not verified runtime activation):\n'
+        for (reference, duplicate), relationship in face_pairs.items():
+            if reference not in coincident_ids and duplicate not in coincident_ids:
+                continue
+            interfaces, constraints = _relationship_usage(relationship)
+            msg += f'  {reference} <-> {duplicate}: interfaces {sorted(relationship["interfaces"])}\n'
+            interface_names = {
+                name for entity_key in interfaces
+                for name in entity_submodels.get(entity_key, set())
+                if _is_submodelpart_visualized(name)
+            }
+            msg += f'    Interface entities shown/referenced: {sorted(interfaces)}\n'
+            msg += f'    Interface parts shown/referenced: {", ".join(sorted(interface_names)) or "None"}\n'
+            for stage, master_name, slave_name in sorted(relationship['constraints']):
+                status = 'shown/referenced' if (stage, master_name, slave_name) in constraints else 'not shown/referenced'
+                msg += f'    [{stage}] master/slave candidate: {master_name} -> {slave_name} ({status})\n'
 
         # If double-click: zoom to this node's small neighborhood
-        if getattr(event, 'dblclick', False):
+        if zoom:
             _zoom_to_node_index(closest_idx)
 
         # For nodes that belong to multiple SubModelParts, print separate process
@@ -1508,6 +1786,31 @@ def visualize_mdpa(mdpa_path, project_paths):
 
         print(msg)
         _show_report(f'Node {nid}', msg)
+
+    def _lookup_node(text):
+        try:
+            node_id = int(text.strip())
+        except ValueError:
+            print('Node ID must be an integer.')
+            return
+        if node_id not in nodes:
+            print(f'Node {node_id} is not present in this MDPA.')
+            return
+        index = node_ids.index(node_id)
+        _inspect_node(index)
+        neighbors = set(xy_to_node_ids[node_xy[node_id]])
+        for counterpart in tuple(neighbors):
+            for record in incident_entities.get(counterpart, []):
+                neighbors.update(record[3])
+        coordinates = np.array([display_nodes[neighbor][:2] for neighbor in neighbors])
+        lower = coordinates.min(axis=0)
+        upper = coordinates.max(axis=0)
+        padding = np.maximum((upper - lower) * 0.15, max(dx, dy) * 0.001)
+        ax.set_xlim(lower[0] - padding[0], upper[0] + padding[0])
+        ax.set_ylim(lower[1] - padding[1], upper[1] + padding[1])
+        fig.canvas.draw_idle()
+
+    node_lookup.on_submit(_lookup_node)
 
     # Left-mouse drag panning (touchpad press+move translates to left-button drag events).
     pan_state = {
@@ -1616,6 +1919,8 @@ def visualize_mdpa(mdpa_path, project_paths):
 
     def on_key(event):
         """Handle keyboard input to show processes for SubModelParts."""
+        if any(widget.capturekeystrokes for widget in (gap_value, node_lookup, search_box)):
+            return
         if event.key is None:
             return
         
@@ -1658,4 +1963,3 @@ def visualize_mdpa(mdpa_path, project_paths):
     # Do not call tight_layout() here: it can resize axes and overlap with
     # manually positioned control panels.
     plt.show()
-

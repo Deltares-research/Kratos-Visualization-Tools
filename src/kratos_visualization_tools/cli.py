@@ -27,4 +27,3 @@ def main():
 
     visualize_mdpa(args.mdpa, args.project or [])
 
-

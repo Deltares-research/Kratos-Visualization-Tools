@@ -7,7 +7,37 @@ from collections import defaultdict
 from .mdpa import _normalize_submodelpart_name, _stage_from_process_label
 
 
-def parse_project_parameters(paths, base_dir=None):
+def _resolve_stage_activity(stage_order, stage_activity, selected_stage,
+                            referenced_submodels=()):
+    """Partition modeled and current-stage referenced parts by latest operation."""
+    if selected_stage == 'All':
+        return set(), set()
+
+    modeled = set()
+    operation_state = {}
+    for stage in stage_order:
+        activity = stage_activity.get(stage, {})
+        modeled.update(activity.get('problem_domain', set()))
+        for submodelpart, is_active in activity.get('operations', []):
+            operation_state[submodelpart] = is_active
+        if stage == selected_stage:
+            break
+
+    candidates = (
+        modeled
+        | stage_activity.get(selected_stage, {}).get('processes', set())
+        | set(referenced_submodels)
+    )
+    active = {
+        submodelpart for submodelpart in candidates
+        if operation_state.get(submodelpart, True)
+    }
+    deactivated = candidates - active
+    return active, deactivated
+
+
+def parse_project_parameters(paths, base_dir=None, constraint_relations=None,
+                             stage_activity=None):
     """Extract processes/operations from ProjectParameters or orchestrator JSON files."""
     mapping = defaultdict(list)
     stage_names = []
@@ -15,6 +45,54 @@ def parse_project_parameters(paths, base_dir=None):
     orchestrator_stage_names = []
     standalone_stage_names = []
     stage_referenced_submodels = defaultdict(set)
+
+    def record_stage_activity(stage_name, stage_data):
+        if not isinstance(stage_data, dict) or stage_activity is None:
+            return
+        activity = stage_activity.setdefault(
+            stage_name, {'problem_domain': set(), 'operations': []})
+        solver_settings = stage_data.get('solver_settings')
+        if not isinstance(solver_settings, dict):
+            stage_settings = stage_data.get('stage_settings', {})
+            solver_settings = (
+                stage_settings.get('solver_settings', {})
+                if isinstance(stage_settings, dict) else {}
+            )
+        if isinstance(solver_settings, dict):
+            problem_domain = solver_settings.get('problem_domain_sub_model_part_list', [])
+            if isinstance(problem_domain, list):
+                activity['problem_domain'].update(
+                    _normalize_submodelpart_name(name)
+                    for name in problem_domain if isinstance(name, str)
+                )
+
+        preproc = stage_data.get('stage_preprocess', {})
+        operations = preproc.get('operations', []) if isinstance(preproc, dict) else []
+        if not isinstance(operations, list):
+            return
+        for operation in operations:
+            if not isinstance(operation, dict):
+                continue
+            operation_name = str(operation.get('name', '')).lower()
+            if 'deactivatemodelpartoperation' in operation_name:
+                is_active = False
+            elif any(name in operation_name for name in (
+                    'activatemodelpartoperation', 'activemodelpartoperation')):
+                is_active = True
+            else:
+                continue
+            params = operation.get('Parameters', {})
+            names = []
+            if isinstance(params, dict):
+                name = params.get('model_part_name') or params.get('model_part')
+                if isinstance(name, str):
+                    names.append(name)
+                name_list = params.get('model_part_name_list')
+                if isinstance(name_list, list):
+                    names.extend(part for part in name_list if isinstance(part, str))
+            for name in names:
+                activity['operations'].append(
+                    (_normalize_submodelpart_name(name), is_active))
 
     def _register_stage(stage_name, source=None):
         if isinstance(stage_name, str) and stage_name and stage_name not in seen_stages:
@@ -117,7 +195,7 @@ def parse_project_parameters(paths, base_dir=None):
                     return f"{process_name} ({', '.join(filtered)})"
             return process_name
 
-        def extract_process_model_parts(params):
+        def extract_process_model_parts(params, relation_stage=None):
             model_parts = []
 
             mp = params.get('model_part_name') or params.get('model_part')
@@ -133,16 +211,30 @@ def parse_project_parameters(paths, base_dir=None):
             if isinstance(slave_mp, str):
                 model_parts.append(slave_mp)
 
+            if constraint_relations is not None and isinstance(master_mp, str) and isinstance(slave_mp, str):
+                relationship = (master_mp, slave_mp,
+                                relation_stage or stage_name or 'Global')
+                if relationship not in constraint_relations:
+                    constraint_relations.append(relationship)
+
             mp_list = params.get('model_part_name_list')
             if isinstance(mp_list, list):
                 model_parts.extend([name for name in mp_list if isinstance(name, str)])
 
             return model_parts
 
+        def record_process_model_parts(model_parts):
+            if stage_activity is not None and stage_name:
+                activity = stage_activity.setdefault(
+                    stage_name, {'problem_domain': set(), 'operations': []})
+                activity.setdefault('processes', set()).update(
+                    _normalize_submodelpart_name(name) for name in model_parts)
+
         def process_stage_data(stage_key, stage_data):
             _register_stage(stage_key, source=stage_source or 'orchestrator')
             if not isinstance(stage_data, dict):
                 return
+            record_stage_activity(stage_key, stage_data)
 
             # Look in stage_preprocess operations/modelers.
             if 'stage_preprocess' in stage_data:
@@ -157,6 +249,9 @@ def parse_project_parameters(paths, base_dir=None):
                                     op_name = op.get('name', 'Operation')
                                     op_name = build_stage_process_label(op_name, stage_key)
                                     mp_list = extract_submodelpart_names(op)
+                                    if isinstance(op.get('Parameters'), dict):
+                                        mp_list.extend(extract_process_model_parts(
+                                            op['Parameters'], relation_stage=stage_key))
                                     for mp in mp_list:
                                         collection.append((mp, op_name))
 
@@ -169,6 +264,9 @@ def parse_project_parameters(paths, base_dir=None):
                                     mod_name = mod.get('name', 'Modeler')
                                     mod_name = build_stage_process_label(mod_name, stage_key)
                                     mp_list = extract_submodelpart_names(mod)
+                                    if isinstance(mod.get('Parameters'), dict):
+                                        mp_list.extend(extract_process_model_parts(
+                                            mod['Parameters'], relation_stage=stage_key))
                                     for mp in mp_list:
                                         collection.append((mp, mod_name))
 
@@ -225,7 +323,9 @@ def parse_project_parameters(paths, base_dir=None):
                                 params = p.get('Parameters', {})
                                 process_label = build_process_label(p, proc_name)
                                 process_label = build_stage_process_label(process_label, stage_name)
-                                for mp in extract_process_model_parts(params):
+                                model_parts = extract_process_model_parts(params)
+                                record_process_model_parts(model_parts)
+                                for mp in model_parts:
                                     collection.append((mp, process_label))
             
             # Processes as list
@@ -235,7 +335,9 @@ def parse_project_parameters(paths, base_dir=None):
                         params = p.get('Parameters', {})
                         process_label = build_process_label(p, 'Process')
                         process_label = build_stage_process_label(process_label, stage_name)
-                        for mp in extract_process_model_parts(params):
+                        model_parts = extract_process_model_parts(params)
+                        record_process_model_parts(model_parts)
+                        for mp in model_parts:
                             collection.append((mp, process_label))
             
             # Orchestrator/stages format: look for operations, modelers, etc
@@ -283,6 +385,7 @@ def parse_project_parameters(paths, base_dir=None):
             filename_stage = standalone_stage_name(resolved_path, j)
             if filename_stage:
                 _register_stage(filename_stage, source='standalone')
+                record_stage_activity(filename_stage, j)
             processes_list = extract_processes(j, stage_name=filename_stage)
             if filename_stage and isinstance(j.get('solver_settings'), dict):
                 standalone_solver = {
@@ -371,4 +474,3 @@ def find_mdpa_from_project(project_path):
         return project_relative
 
     return os.path.normpath(expanded)
-

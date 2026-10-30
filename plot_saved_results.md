@@ -17,6 +17,11 @@ import API.
 
 ## Usage
 
+On Windows, drag a plot configuration JSON file onto `plot_saved_results.bat`,
+or double-click the launcher and supply the file at its prompt. It also accepts
+the same arguments as the Python script, including `--show`.
+See [Windows launchers](./README.md#windows-launchers) for details.
+
 ```powershell
 python plot_saved_results.py plot_configs\crow_staged_construction.json
 python plot_saved_results.py my_config.json --output-dir .\figures

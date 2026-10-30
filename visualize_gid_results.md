@@ -65,6 +65,11 @@ Gauss-point results.
 
 ## Usage
 
+On Windows, drag a mesh or results file onto `visualize_gid_results.bat`, or
+double-click the launcher and supply the file at its prompt. It also accepts
+the same arguments as the Python script, including `--gui`.
+See [Windows launchers](./README.md#windows-launchers) for details.
+
 Run these commands from this directory, or provide paths relative to the current directory:
 
 ```powershell

@@ -62,6 +62,41 @@ kratos-visualize-gid path/to/case --list
 kratos-plot-saved-results my_config.json --output-dir ./figures
 ```
 
+## Windows launchers
+
+The three `.bat` launchers live beside their matching Python scripts:
+
+| Launcher | Input |
+|---|---|
+| [`visualize_mdpa_project.bat`](./visualize_mdpa_project.bat) | MDPA mesh |
+| [`visualize_gid_results.bat`](./visualize_gid_results.bat) | GiD mesh, results file, or case base path |
+| [`plot_saved_results.bat`](./plot_saved_results.bat) | Plot configuration JSON |
+
+Drag an input file onto its launcher in File Explorer, or double-click the launcher
+and paste or drag the input path into the prompt, then press Enter. The MDPA
+launcher auto-detects project JSON files beside the mesh when `-p` is omitted.
+The GiD launcher opens the default Matplotlib viewer; use `--gui` for the optional
+desktop interface.
+
+The launchers use `.venv\Scripts\python.exe` in this repository when present,
+otherwise `python` from PATH. Install the dependencies in that environment first.
+Keep the launchers beside the scripts; create Windows shortcuts rather than
+copying the batch files into model folders.
+
+All command-line arguments are forwarded unchanged, so options remain available:
+
+```powershell
+.\visualize_mdpa_project.bat "C:\Models\my case\model.mdpa" -p ProjectParameters.json
+.\visualize_mdpa_project.bat -p "C:\Models\my case\ProjectParameters.json"
+.\visualize_gid_results.bat "C:\Models\my case\case.post.res" --gui
+.\plot_saved_results.bat "C:\Models\my case\plots.json" --show
+```
+
+The caller's working directory is preserved, so relative paths behave as they do
+with the Python commands. Paths containing spaces must be quoted on the command
+line. Failures pause the window so you can read the error, and the launchers
+preserve the Python process's exit code.
+
 ## Optional GiD desktop interface
 
 Install the PySide6 interface and launch it with `--gui`:

@@ -17,6 +17,11 @@ A small interactive tool to visualize node-based SubModelParts from a Kratos `.m
 
 ## Quick start
 
+On Windows, drag an MDPA file onto `visualize_mdpa_project.bat`, or double-click
+the launcher and supply the file at its prompt. It also accepts the same arguments
+as the Python script. See [Windows launchers](./README.md#windows-launchers) for
+environment selection and examples.
+
 ```bash
 python visualize_mdpa_project.py path/to/your.mdpa -p ProjectParameters.json
 ```
@@ -56,7 +61,7 @@ If `-p` is omitted, the tool auto-detects common JSON files in the `.mdpa` direc
 	- `Show` / `Hide` apply to current `Find` matches
 	- `Invert` applies globally (visible <-> hidden for all SubModelParts)
 - Scrollable SubModelPart list and stage list (mouse wheel + sliders)
-- Stage selector (`All` + discovered stages) that applies stage-active visibility directly to checkboxes
+- Stage selector (`All` + discovered stages) that selects `All` or a specific stage makes visible available submodelparts at the choosen stage
 - Auto-discovery and expansion of project/stage JSON inputs
 - `Draw mesh` toggle for black Element/Condition connectivity lines
 - Kratos higher-order mesh topology handling:
@@ -115,4 +120,3 @@ If `-p` is omitted, the tool auto-detects common JSON files in the `.mdpa` direc
 	- `1..9, 0` show process report for SubModelPart #1..#10
 	- `z` zooms to the last clicked node (progressive)
 	- `r` resets zoom
-

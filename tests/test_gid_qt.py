@@ -90,6 +90,15 @@ def test_selectors_and_controls(window, app):
     app.processEvents()
 
 
+def test_control_panel_is_compact_with_long_result_names(window, app):
+    window.result.addItem("A_VERY_LONG_RESULT_NAME_" * 8)
+    app.processEvents()
+    panel = window.findChild(QtWidgets.QScrollArea)
+    assert panel.width() == 240
+    assert panel.horizontalScrollBar().maximum() == 0
+    assert window.viewer.canvas.width() > panel.width()
+
+
 def test_profile_gradient_and_files(window, tmp_path, monkeypatch):
     window.checks["show_profile"].click()
     window.profile_x.setText("0.25")

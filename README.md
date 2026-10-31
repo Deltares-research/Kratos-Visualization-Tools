@@ -110,6 +110,9 @@ Install the PySide6 interface and launch it with `--gui`:
 python -m pip install -e ".[gui]"
 python visualize_gid_results.py path\to\case --gui
 
+# Open the three-button workflow chooser
+python visualize_gid_results.py --gui
+
 # Compare two solutions with desktop controls
 python visualize_gid_results.py path\to\first --compare path\to\second --gui
 ```
@@ -118,6 +121,7 @@ The desktop interface embeds the existing Matplotlib plot and provides visible
 controls instead of requiring hotkeys. It supports single-solution viewing,
 folder browsing (`--folder path\to\results --gui`), and two-solution comparison
 (`--compare path\to\second --gui`; `--comparison` is an alias).
+Run with `--gui` and no file/folder to open a chooser for those three workflows.
 The existing keyboard-driven viewer remains the default without `--gui`.
 See the [GiD documentation](./visualize_gid_results.md) for details.
 

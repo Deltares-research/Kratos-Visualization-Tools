@@ -186,10 +186,37 @@ def main():
             raise RuntimeError(f"No mesh/result solution pairs found in {folder_path}")
         args.name = str(solution_paths[0][0])
 
+    profile_path = parse_profile_path(args.profile_path)
+
+    if not args.name and args.gui:
+        try:
+            from .qt_start import render_gid_start_gui
+        except ModuleNotFoundError as exc:
+            if exc.name != "PySide6" and not (exc.name or "").startswith("PySide6."):
+                raise
+            parser.error("The Qt viewer requires PySide6. Install it with: pip install '.[gui]'")
+        return render_gid_start_gui({
+            "result": args.result,
+            "step": args.step,
+            "location": args.location,
+            "component": args.component,
+            "tensor_component": args.tensor_component,
+            "profile_x": args.profile_x,
+            "profile_path": profile_path,
+            "profile": args.profile,
+            "isolines": args.isolines,
+            "isoline_labels": args.isoline_labels,
+            "contour_levels": args.contour_levels,
+            "colormap": args.colormap,
+            "comparison_style": args.comparison_style,
+            "show_mesh": args.initial_show_mesh,
+            "show_gradient": args.initial_show_gradient,
+            "show_deformation": args.initial_show_deformation,
+            "deformation_scale": args.initial_deformation_scale,
+        })
+
     if not args.name:
         parser.error("name is required unless --extract-json is used or comparison settings provide solution paths")
-
-    profile_path = parse_profile_path(args.profile_path)
 
     if args.compare:
         first = load_solution_data(args.name, "solution 1", base_dir=Path.cwd())

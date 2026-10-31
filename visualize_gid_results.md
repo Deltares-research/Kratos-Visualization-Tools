@@ -27,6 +27,9 @@ python -m pip install -e ".[gui]"
 # Open one solution with visible desktop controls
 python visualize_gid_results.py path\to\case --gui
 
+# Open the workflow chooser and select an input through file dialogs
+python visualize_gid_results.py --gui
+
 # Browse the solutions in a folder
 python visualize_gid_results.py --folder path\to\results --gui
 
@@ -46,10 +49,17 @@ are available through visible controls, and coordinate inspection displays a
 desktop report. Previous/next controls and playback make time-step browsing
 discoverable.
 
+Both viewing modes use a compact 240-pixel control sidebar with labels above
+their fields and vertical scrolling, leaving more space for the plot.
+
 Existing initial-view options, such as `--result`, `--component`, `--profile`,
 `--profile-path`, and `--settings`, can be used with `--gui`.
 The GUI is opt-in for single solutions, folder browsing, and two-solution
-comparison. `--comparison` is an alias for `--compare`. Without `--gui`, the
+comparison. Run `python visualize_gid_results.py --gui` without an input to
+open the workflow chooser: **View one solution**, **Compare two solutions**,
+or **Browse a results folder**. The first two workflows let you select matching
+GiD mesh/result files through file dialogs. `--comparison` is an alias for
+`--compare`. Without `--gui`, the
 existing keyboard-driven viewers remain the default. Listing, batch extraction,
 and static exports remain available without PySide6. `--gui` cannot be combined
 with `--list`, `--extract-json`, or static `--save` (unless `--interactive` is
@@ -63,7 +73,7 @@ The comparison sidebar provides:
   a step slider, and Previous/Next step buttons;
 - all five comparison styles, colormap, contour levels, isolines and labels;
 - mesh, domain-edge, and profile toggles, with editable profile x/path;
-- an editable shared color range and an Automatic color range button;
+- an editable shared color range with Apply range and Auto range buttons;
 - nearest-node or IDW coordinate inspection by click or typed `x,y`;
 - image and comparison-settings saves.
 

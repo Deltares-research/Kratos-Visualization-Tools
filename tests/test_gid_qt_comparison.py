@@ -86,6 +86,15 @@ def test_comparison_controls_and_layout(window, app):
     app.processEvents()
 
 
+def test_comparison_control_panel_is_compact(window, app):
+    window.result.addItem("A_VERY_LONG_RESULT_NAME_" * 8)
+    app.processEvents()
+    panel = window.findChild(QtWidgets.QScrollArea)
+    assert panel.width() == 240
+    assert panel.horizontalScrollBar().maximum() == 0
+    assert window.viewer.canvas.width() > panel.width()
+
+
 def test_comparison_scale_profile_inspection_and_saves(window, tmp_path, monkeypatch):
     v = window.viewer
     window.minimum.setText("-2")

@@ -133,6 +133,7 @@ def main():
     args.initial_colormap = None
     args.initial_show_deformation = False
     args.initial_deformation_scale = 1.0
+    args.calculated_fields = {}
     solution_paths = None
     if args.settings:
         settings_path = Path(args.settings).expanduser().resolve()
@@ -213,12 +214,15 @@ def main():
             "show_gradient": args.initial_show_gradient,
             "show_deformation": args.initial_show_deformation,
             "deformation_scale": args.initial_deformation_scale,
+            **({"calculated_fields": args.calculated_fields} if args.calculated_fields else {}),
         })
 
     if not args.name:
         parser.error("name is required unless --extract-json is used or comparison settings provide solution paths")
 
     if args.compare:
+        if args.calculated_fields:
+            parser.error("Calculated fields are supported only in the single/folder viewer.")
         first = load_solution_data(args.name, "solution 1", base_dir=Path.cwd())
         second = load_solution_data(args.compare, "solution 2", base_dir=Path.cwd())
         print_comparison_summary(first, second)
@@ -387,9 +391,12 @@ def main():
             solution_paths=solution_paths,
             initial_show_deformation=args.initial_show_deformation,
             initial_deformation_scale=args.initial_deformation_scale,
+            **({"calculated_fields": args.calculated_fields} if args.calculated_fields else {}),
         )
     else:
         # Static mode: load single result and save to file
+        if args.calculated_fields:
+            parser.error("Calculated-field settings require an interactive viewer; use --gui.")
         step, location = pick_step(headers, args.result, args.step, args.location)
         result_type, values = load_values(res_path, args.result, step, location)
         if not values:

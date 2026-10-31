@@ -19,6 +19,7 @@ from .models import TENSOR_COMPONENTS, VECTOR_COMPONENTS
 from .parsing import detect_profile_nodes, scan_result_headers
 from .viewer import InteractiveViewer
 from .profile_bundle import save_profile_bundle
+from .expressions import FieldExpression, FUNCTIONS, TENSOR_ATTRIBUTES
 
 
 class QtInteractiveViewer(InteractiveViewer):
@@ -82,7 +83,7 @@ class QtInteractiveViewer(InteractiveViewer):
         headers_by_solution = {self.solution_index: self.headers}
         for index, (_, path) in enumerate(self.solution_paths):
             if index not in headers_by_solution:
-                headers_by_solution[index] = scan_result_headers(path)
+                headers_by_solution[index] = self._calculated_headers(scan_result_headers(path))
         return [
             frame for frame in frames
             if any(h.name == frame[1] and str(h.step) == frame[2]
@@ -151,6 +152,8 @@ class GidMainWindow(QtWidgets.QMainWindow):
         self.solution = self.combo("Solution", [], self.select_solution)
         self.solution.setVisible(bool(self.viewer.solution_paths))
         self.result = self.combo("Result", [], self.select_result)
+        self.button("New field…", self.open_calculated_field).setToolTip(
+            "Create or edit a calculated field using an arithmetic formula.")
         self.location = self.combo("Location", [], self.select_location)
         self.step = self.combo("Step", [], self.select_step)
         self.component = self.combo("Vector component", VECTOR_COMPONENTS,
@@ -229,6 +232,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
         try:
             action()
             self.sync_controls()
+            return True
         except (OSError, ValueError, RuntimeError) as exc:
             self.timer.stop()
             # Axes/colorbars may already have been replaced before rendering failed.
@@ -243,6 +247,45 @@ class GidMainWindow(QtWidgets.QMainWindow):
             self.sync_controls()
             self.statusBar().showMessage(message)
             QtWidgets.QMessageBox.warning(self, "GiD viewer", message)
+            return False
+
+    def open_calculated_field(self):
+        dialog = CalculatedFieldDialog(self)
+        dialog.exec()
+
+    def define_calculated_field(self, name, formula):
+        original = [header for header in self.viewer.headers if header.header_line >= 0]
+        if (not name.isidentifier() or name in FUNCTIONS or
+                any(header.name.casefold() == name.casefold() for header in original)):
+            raise ValueError("Choose a unique field name (letters, digits and underscores).")
+        if any(key != name and key.casefold() == name.casefold()
+               for key in self.viewer.calculated_fields):
+            raise ValueError("A calculated field with this name already exists.")
+        expression = FieldExpression(formula, original)
+        if not expression.steps:
+            raise ValueError("The input fields have no common time steps.")
+        step = self.viewer.get_current_step()
+        if step not in expression.steps:
+            step = expression.steps[-1]
+        values = expression.evaluate(
+            self.viewer.node_ids,
+            lambda source, location: self.viewer._load_cached_values(source, step, location),
+            self.viewer.tri,
+        )
+        v = self.viewer
+        v.calculated_fields = {**v.calculated_fields, name: formula}
+        v.headers = v._calculated_headers(original)
+        v.result_names = sorted({header.name for header in v.headers})
+        v.current_result = name
+        v.result_idx = v.result_names.index(name)
+        v.current_location = "OnNodes"
+        v.current_step_str = str(step)
+        v.show_deformation = False
+        v.show_gradient = False
+        v.result_cache = {key: value for key, value in v.result_cache.items()
+                          if key[0] not in v.calculated_fields}
+        v.result_cache[(name, step, "OnNodes")] = ("Scalar", values)
+        self.redraw()
 
     @staticmethod
     def set_combo(widget, values, selected):
@@ -268,6 +311,13 @@ class GidMainWindow(QtWidgets.QMainWindow):
             f"Solution ({len(v.solution_paths)})")
         self.solution.blockSignals(False)
         self.set_combo(self.result, v.result_names, v.current_result)
+        unavailable = sorted(set(v.calculated_fields) - set(v.result_names))
+        self.result.setToolTip(
+            "Unavailable calculated fields in this stage: " + ", ".join(unavailable)
+            if unavailable else v.calculated_fields.get(v.current_result, v.current_result))
+        if unavailable:
+            self.statusBar().showMessage(
+                "Unavailable calculated fields in this stage: " + ", ".join(unavailable))
         headers = [h for h in v.headers if h.name == v.current_result]
         self.set_combo(self.location, sorted({h.location for h in headers}), v.current_location)
         steps = sorted({h.step for h in headers if h.location == v.current_location})
@@ -468,6 +518,96 @@ class GidMainWindow(QtWidgets.QMainWindow):
         self.viewer.canvas.close()
         self.viewer.fig.clear()
         super().closeEvent(event)
+
+
+class CalculatedFieldDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Calculated field")
+        self.resize(580, 380)
+        layout = QtWidgets.QFormLayout(self)
+        self.name = QtWidgets.QComboBox()
+        self.name.setEditable(True)
+        self.name.addItems(list(window.viewer.calculated_fields))
+        current = window.viewer.current_result
+        default_name = current if current in window.viewer.calculated_fields else "CALCULATED_FIELD"
+        name, formula = getattr(window, "_calculated_field_draft", (
+            default_name, window.viewer.calculated_fields.get(default_name, "")))
+        self.name.setCurrentText(name)
+        layout.addRow("Field name", self.name)
+        self.formula = QtWidgets.QLineEdit()
+        self.formula.setText(formula)
+        self.formula.setPlaceholderText("max(abs(WATER_PRESSURE), STRESS.xx)")
+        layout.addRow("Formula", self.formula)
+        self.input = QtWidgets.QComboBox()
+        self.input.addItems(sorted({h.name for h in window.viewer.headers if h.header_line >= 0}))
+        self.component = QtWidgets.QComboBox()
+        self.input.currentTextChanged.connect(self._components)
+        self._components()
+        layout.addRow("Input field", self.input)
+        layout.addRow("Component", self.component)
+        insert = QtWidgets.QPushButton("Insert input")
+        insert.clicked.connect(self._insert_input)
+        layout.addRow(insert)
+        operations = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(operations)
+        for index, token in enumerate(("+", "-", "*", "/", "(", ")") + FUNCTIONS):
+            button = QtWidgets.QPushButton(token)
+            button.clicked.connect(
+                lambda checked=False, text=token: self.formula.insert(
+                    text + "(" if text in FUNCTIONS else text))
+            grid.addWidget(button, index // 5, index % 5)
+        layout.addRow(operations)
+        help_text = QtWidgets.QLabel(
+            "Result names are case-insensitive. Use STRESS.xx, STRESS.yy or STRESS.trace.\n"
+            "abs / mag: scalar absolute value or vector magnitude.\n"
+            "min(a,b) / max(a,b): pointwise. grad: magnitude; grad_x / grad_y: components.\n"
+            "Inputs use the same step; Gauss-point data is projected to nodes.\n"
+            "Calculated fields produce scalars. Units are not converted automatically.")
+        help_text.setWordWrap(True)
+        layout.addRow(help_text)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Apply |
+            QtWidgets.QDialogButtonBox.StandardButton.Close)
+        buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Apply).clicked.connect(self._apply)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+        self.name.currentTextChanged.connect(self._select_definition)
+        self.formula.textChanged.connect(self._remember_draft)
+
+    def _select_definition(self, name):
+        if name in self.window.viewer.calculated_fields:
+            self.formula.setText(self.window.viewer.calculated_fields[name])
+        self._remember_draft()
+
+    def _remember_draft(self):
+        self.window._calculated_field_draft = (
+            self.name.currentText(), self.formula.text())
+
+    def done(self, result):
+        self._remember_draft()
+        super().done(result)
+
+    def _components(self):
+        result_type = next(h.result_type.lower() for h in self.window.viewer.headers
+                           if h.name == self.input.currentText())
+        self.component.clear()
+        self.component.addItems(
+            list(TENSOR_ATTRIBUTES) if result_type == "matrix" else
+            ["whole vector"] + list(VECTOR_COMPONENTS) if result_type == "vector" else ["scalar"])
+
+    def _insert_input(self):
+        component = self.component.currentText()
+        self.formula.insert(self.input.currentText() +
+                            ("." + component if component not in ("scalar", "whole vector") else ""))
+        self.formula.setFocus()
+
+    def _apply(self):
+        self._remember_draft()
+        if self.window.run_action(lambda: self.window.define_calculated_field(
+                self.name.currentText().strip(), self.formula.text().strip())):
+            self.accept()
 
 
 def render_plot_gui(**options):

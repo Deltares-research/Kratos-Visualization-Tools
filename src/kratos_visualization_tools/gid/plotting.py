@@ -210,6 +210,7 @@ def render_plot_interactive(
     initial_solution_index: int = 0,
     initial_show_deformation: bool = False,
     initial_deformation_scale: float = 1.0,
+    calculated_fields: Optional[Dict[str, str]] = None,
 ):
     """Launch interactive viewer."""
     viewer = InteractiveViewer(
@@ -240,6 +241,7 @@ def render_plot_interactive(
         initial_solution_index=initial_solution_index,
         initial_show_deformation=initial_show_deformation,
         initial_deformation_scale=initial_deformation_scale,
+        calculated_fields=calculated_fields,
     )
     plt.show()
 

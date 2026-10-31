@@ -74,3 +74,9 @@ def apply_visualization_settings(args, settings: Dict[str, object]):
     args.initial_colormap = settings.get("colormap")
     args.initial_show_deformation = bool(settings.get("show_deformation", False))
     args.initial_deformation_scale = float(settings.get("deformation_scale", 1.0))
+    definitions = settings.get("calculated_fields", {})
+    if not isinstance(definitions, dict) or not all(
+            isinstance(name, str) and isinstance(formula, str)
+            for name, formula in definitions.items()):
+        raise ValueError("calculated_fields must map field names to formula strings.")
+    args.calculated_fields = definitions

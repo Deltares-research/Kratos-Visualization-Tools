@@ -119,6 +119,8 @@ class GidStartWindow(QtWidgets.QMainWindow):
             "solution_paths": solution_paths,
             "initial_show_deformation": self.defaults.get("show_deformation", False),
             "initial_deformation_scale": self.defaults.get("deformation_scale", 1.0),
+            **({"calculated_fields": self.defaults["calculated_fields"]}
+               if self.defaults.get("calculated_fields") else {}),
         }
         return render_plot_gui(**renderer_options)
 
@@ -136,6 +138,10 @@ class GidStartWindow(QtWidgets.QMainWindow):
             self._show_error(error)
 
     def open_comparison(self):
+        if self.defaults.get("calculated_fields"):
+            self._show_error(ValueError(
+                "Calculated fields are supported only in the single/folder viewer."))
+            return
         first_path = self._choose_solution("Choose the first GiD solution")
         if first_path is None:
             return

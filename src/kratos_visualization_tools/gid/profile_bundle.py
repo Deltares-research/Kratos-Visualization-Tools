@@ -77,6 +77,8 @@ def save_profile_bundle(viewer, parent, *, include_difference=False):
         "difference_interpolation": "linear on overlapping solution 2 coordinates"
         if include_difference else None,
     }
+    if not comparison and viewer.current_result in getattr(viewer, "calculated_fields", {}):
+        metadata["formula"] = viewer.calculated_fields[viewer.current_result]
     series = [{
         "source": "csv", "file": "profile.csv", "x_column": "value",
         "y_column": "coordinate", "filter": {"series": key}, "label": label,

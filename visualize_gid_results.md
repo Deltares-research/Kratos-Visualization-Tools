@@ -53,6 +53,60 @@ first and last stages. With a single solution, it cycles through that file's
 steps. The **Solution** dropdown still allows switching stages directly.
 Playback also supports browsing time steps across folder solutions.
 
+#### Calculated fields
+
+In the single-solution or folder desktop viewer, click **New field…** to open
+the **Calculated field** popup. Enter a unique field name and a formula.
+Use the input/component selectors and **Insert input**, or type directly.
+**Apply** evaluates the formula and selects the new scalar result.
+To edit a definition, select its name in the popup.
+Reopening the popup restores the last field name and formula, including failed
+or unapplied formulas, for correction. Changing to a new name retains the
+formula so it can be adapted as a copy. Drafts last only for the current viewer
+session; **Save settings…** persists successfully applied definitions.
+
+Examples (use result names actually present in your GiD files):
+
+```text
+abs(WATER_PRESSURE)
+STRESS.xx + STRESS.yy
+STRESS.trace - WATER_PRESSURE
+max(WATER_PRESSURE, 0)
+min(abs(WATER_PRESSURE), 100)
+grad(WATER_PRESSURE)
+grad_x(STRESS.xx) + grad_y(STRESS.yy)
+abs(DISPLACEMENT)
+```
+
+Supported operations are `+`, `-`, `*`, `/`, unary signs and parentheses.
+`abs` and `mag` return scalar absolute value or vector magnitude.
+`min(a,b)` and `max(a,b)` operate pointwise, not over the whole mesh.
+`grad` returns the gradient magnitude; `grad_x` and `grad_y` return its
+components using the existing nodal-gradient calculation.
+Vector components are `.x`, `.y`, `.z`, `.magnitude`; tensors support
+`.xx`, `.yy`, `.xy`, `.yx`, `.zz`, `.yz`, `.zy`, `.xz`, `.zx`,
+`.trace` and `.magnitude`. Component availability depends on the stored data.
+Bare tensor fields require an explicit component/reduction; vector arithmetic
+requires a component or magnitude. Result names are case-insensitive.
+
+Inputs are aligned by node ID and evaluated at the same time step.
+Nodal input is preferred; Gauss-point fields are projected to nodes with the
+existing projection before combining them. Only common input steps appear.
+Missing nodal samples are excluded; division by zero, invalid formulas and
+unusable gradients produce an error. Units are not checked or converted.
+Formulas reference original GiD fields, not other calculated fields.
+
+Calculated fields support profiles, isolines, inspection, gradient display,
+CSV profile exports and **Open in plotter**. Definitions persist across folder
+stages and are saved by **Save settings…**; reopen with `--settings … --gui`.
+A definition whose inputs are absent or have no common steps in a stage is
+unavailable there (reported in the status bar/result tooltip); attempting to
+switch stages while it is selected reports an error and retains the previous
+stage. Choose an original result first to browse such a stage.
+Profile bundles record the formula in their metadata.
+This popup is not available in comparison mode. Saved calculated-field settings
+require interactive rendering, not `--save` static rendering.
+
 Both viewing modes use a compact 240-pixel control sidebar with labels above
 their fields and vertical scrolling, leaving more space for the plot.
 When browsing a folder, the Solution dropdown lists all matching solution

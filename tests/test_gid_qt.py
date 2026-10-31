@@ -8,6 +8,7 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 
 pytest.importorskip("PySide6")
@@ -90,6 +91,191 @@ def test_selectors_and_controls(window, app):
     window.checks["show_isolines"].click()
     assert window.checks["show_isoline_labels"].isEnabled()
     app.processEvents()
+
+
+def test_calculated_field_popup_profile_and_settings(window, tmp_path):
+    from kratos_visualization_tools.gid.qt_viewer import CalculatedFieldDialog
+    from kratos_visualization_tools.gid.profile_bundle import save_profile_bundle
+
+    dialog = CalculatedFieldDialog(window)
+    dialog.name.setCurrentText("DOUBLED")
+    dialog.input.setCurrentText("PRESSURE")
+    dialog._insert_input()
+    assert dialog.formula.text() == "PRESSURE"
+    dialog.formula.setText("max(abs(pressure * 2), 0)")
+    dialog._apply()
+    assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+    v = window.viewer
+    assert v.current_result == "DOUBLED"
+    assert window.result.currentText() == "DOUBLED"
+    assert window.step.count() == 2
+    raw = v._load_cached_values("PRESSURE", v.get_current_step(), "OnNodes")[1]
+    computed = v._load_cached_values("DOUBLED", v.get_current_step(), "OnNodes")[1]
+    for node_id in raw:
+        assert computed[node_id][0] == abs(raw[node_id][0] * 2)
+    window.profile_x.setText("0")
+    window.run_action(window.apply_profile)
+    assert v.profile_values is not None and window.plotter_button.isEnabled()
+    config = save_profile_bundle(v, tmp_path)
+    assert json.loads(config.read_text())["metadata"]["formula"] == "max(abs(pressure * 2), 0)"
+    settings = v.save_current_settings(tmp_path / "settings.json")
+    assert json.loads(settings.read_text())["calculated_fields"] == v.calculated_fields
+
+
+def test_calculated_field_popup_restores_applied_and_failed_drafts(window, monkeypatch):
+    from kratos_visualization_tools.gid.qt_viewer import CalculatedFieldDialog
+
+    errors = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: errors.append(args[2]))
+    dialog = CalculatedFieldDialog(window)
+    dialog.name.setCurrentText("CUSTOM")
+    dialog.formula.setText("abs(PRESSURE)")
+    dialog._apply()
+    reopened = CalculatedFieldDialog(window)
+    assert reopened.name.currentText() == "CUSTOM"
+    assert reopened.formula.text() == "abs(PRESSURE)"
+    reopened.formula.setText("PRESSURE / 0")
+    reopened._apply()
+    assert errors and "Division by zero" in errors[0]
+    reopened.reject()
+    corrected = CalculatedFieldDialog(window)
+    assert corrected.formula.text() == "PRESSURE / 0"
+    assert window.viewer.calculated_fields == {"CUSTOM": "abs(PRESSURE)"}
+    corrected.formula.setText("PRESSURE * 3")
+    corrected._apply()
+    assert window.viewer.calculated_fields == {"CUSTOM": "PRESSURE * 3"}
+
+
+def test_calculated_field_popup_retains_unapplied_text_and_can_copy_definition(window):
+    from kratos_visualization_tools.gid.qt_viewer import CalculatedFieldDialog
+
+    window.define_calculated_field("ORIGINAL", "PRESSURE * 2")
+    dialog = CalculatedFieldDialog(window)
+    assert dialog.name.currentText() == "ORIGINAL"
+    assert dialog.formula.text() == "PRESSURE * 2"
+    dialog.name.setCurrentText("COPY")
+    assert dialog.formula.text() == "PRESSURE * 2"
+    dialog.formula.setText("PRESSURE +")
+    dialog.close()
+    reopened = CalculatedFieldDialog(window)
+    assert reopened.name.currentText() == "COPY"
+    assert reopened.formula.text() == "PRESSURE +"
+    reopened.name.setCurrentText("ORIGINAL")
+    assert reopened.formula.text() == "PRESSURE * 2"
+    reopened.reject()
+
+
+def test_calculated_field_reload_edit_and_rejected_formula(app, options, tmp_path, monkeypatch):
+    window = GidMainWindow(**options)
+    warnings = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: warnings.append(args[2]))
+    try:
+        assert window.run_action(lambda: window.define_calculated_field("CUSTOM", "PRESSURE * 2"))
+        expected = window.viewer._load_cached_values("CUSTOM", 2, "OnNodes")[1]
+        definitions = dict(window.viewer.calculated_fields)
+        assert not window.run_action(lambda: window.define_calculated_field("CUSTOM", "PRESSURE / 0"))
+        assert window.viewer.calculated_fields == definitions
+        assert "Division by zero" in warnings[0]
+        assert window.run_action(lambda: window.define_calculated_field("CUSTOM", "PRESSURE * 3"))
+        actual = window.viewer._load_cached_values("CUSTOM", 2, "OnNodes")[1]
+        for node_id in expected:
+            assert actual[node_id][0] == expected[node_id][0] * 1.5
+        settings = window.viewer.save_current_settings(tmp_path / "custom.json")
+        from argparse import Namespace
+        from kratos_visualization_tools.gid.config import apply_visualization_settings
+
+        args = Namespace()
+        apply_visualization_settings(args, json.loads(settings.read_text()))
+        restored = GidMainWindow(**{
+            **options, "initial_result": args.result,
+            "calculated_fields": args.calculated_fields,
+        })
+        try:
+            assert restored.viewer.current_result == "CUSTOM"
+            values = restored.viewer._load_cached_values("CUSTOM", 2, "OnNodes")[1]
+            for node_id in actual:
+                assert values[node_id][0] == actual[node_id][0]
+        finally:
+            restored.close()
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+def test_calculated_field_survives_stage_and_step_changes(app, options, tmp_path, monkeypatch):
+    second_mesh, second_result = tmp_path / "second.post.msh", tmp_path / "second.post.res"
+    write_second_mesh(second_mesh)
+    write_second_results(second_result)
+    options["solution_paths"] = (
+        (tmp_path / "model.post.msh", options["res_path"]), (second_mesh, second_result))
+    window = GidMainWindow(**options)
+    warnings = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: warnings.append(args[2]))
+    try:
+        window.run_action(lambda: window.define_calculated_field("DOUBLE", "PRESSURE * 2"))
+        window.run_action(lambda: window.move_step(1))
+        assert window.viewer.current_result == "DOUBLE"
+        assert window.viewer.res_path == second_result
+        computed = window.viewer._load_cached_values("DOUBLE", 1, "OnNodes")[1]
+        assert {node_id: array[0] for node_id, array in computed.items()} == {
+            101: 40, 102: 42, 103: 44}
+        window.run_action(lambda: window.move_step(-1))
+        assert window.viewer.res_path == options["res_path"]
+        assert window.viewer.get_current_step() == 2
+        frames = window.viewer._build_animation_frames()
+        assert frames == [(0, "DOUBLE", "1"), (0, "DOUBLE", "2"), (1, "DOUBLE", "1")]
+        assert not warnings
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+def test_calculated_field_projects_stress_and_computes_gradients(window):
+    v = window.viewer
+    window.run_action(lambda: window.define_calculated_field("STRESS_COPY", "stress.xx"))
+    step = v.get_current_step()
+    raw = v._load_cached_values("STRESS", step, "OnGaussPoints")[1]
+    computed = v._load_cached_values("STRESS_COPY", step, "OnNodes")[1]
+    from kratos_visualization_tools.gid.calculations import tensor_component
+
+    for node_id in computed:
+        assert computed[node_id][0] == tensor_component(raw[node_id], "xx")
+    window.run_action(lambda: window.define_calculated_field("G", "grad_x(PRESSURE)"))
+    assert v.current_result == "G"
+    assert all(np.isfinite(array[0]) for array in v._load_cached_values("G", step, "OnNodes")[1].values())
+
+
+def test_unavailable_calculated_field_stage_switch_rolls_back(app, options, tmp_path, monkeypatch):
+    second_mesh, second_result = tmp_path / "second.post.msh", tmp_path / "second.post.res"
+    write_second_mesh(second_mesh)
+    write_second_results(second_result)
+    options["solution_paths"] = (
+        (tmp_path / "model.post.msh", options["res_path"]), (second_mesh, second_result))
+    window = GidMainWindow(**options)
+    warnings = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: warnings.append(args[2]))
+    try:
+        assert window.run_action(lambda: window.define_calculated_field("COPY", "STRESS.xx"))
+        window.solution.setCurrentIndex(1)
+        assert window.viewer.res_path == options["res_path"]
+        assert window.viewer.current_result == "COPY"
+        assert window.solution.currentIndex() == 0
+        assert warnings and "unavailable" in warnings[0]
+        window.result.setCurrentText("PRESSURE")
+        window.solution.setCurrentIndex(1)
+        assert window.viewer.res_path == second_result
+        assert "COPY" not in window.viewer.result_names
+        assert window.viewer.calculated_fields == {"COPY": "STRESS.xx"}
+        assert "COPY" in window.statusBar().currentMessage()
+        window.solution.setCurrentIndex(0)
+        assert "COPY" in window.viewer.result_names
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
 
 
 def test_control_panel_is_compact_with_long_result_names(window, app):

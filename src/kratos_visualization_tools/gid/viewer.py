@@ -54,8 +54,10 @@ class InteractiveViewer:
         initial_solution_index: int = 0,
         initial_show_deformation: bool = False,
         initial_deformation_scale: float = 1.0,
+        calculated_fields: Optional[Dict[str, str]] = None,
     ):
-        self.headers = headers
+        self.calculated_fields = dict(calculated_fields or {})
+        self.headers = self._calculated_headers(headers)
         self.res_path = res_path
         self.solution_paths = tuple(solution_paths or ())
         self.solution_index = int(initial_solution_index) if self.solution_paths else 0
@@ -72,7 +74,9 @@ class InteractiveViewer:
         self.tri = triangulation_from_connectivity(triangles, self.id_to_pos, self.xy)
 
         # Get unique result names
-        self.result_names = sorted(set(h.name for h in headers))
+        self.result_names = sorted(set(h.name for h in self.headers))
+        if initial_result in self.calculated_fields and initial_result not in self.result_names:
+            raise ValueError(f"Calculated field '{initial_result}' is unavailable in this stage.")
         self.result_idx = self.result_names.index(initial_result) if initial_result in self.result_names else 0
 
         # State
@@ -231,6 +235,11 @@ class InteractiveViewer:
     def get_available_steps(self) -> List[int]:
         return sorted(set(h.step for h in self.headers if h.name == self.current_result))
 
+    def _calculated_headers(self, headers):
+        from .expressions import calculated_headers
+
+        return calculated_headers(headers, self.calculated_fields)
+
     def get_current_step(self) -> int:
         _, loc = pick_step(self.headers, self.current_result, self.current_step_str, self.current_location)
         self.current_location = loc
@@ -309,6 +318,12 @@ class InteractiveViewer:
         if not headers:
             raise RuntimeError(f"No parsable Result blocks found in {res_path}")
 
+        headers = self._calculated_headers(headers)
+        if self.current_result in self.calculated_fields and not any(
+                header.name == self.current_result for header in headers):
+            raise ValueError(
+                f"Calculated field '{self.current_result}' is unavailable in {res_path.name}: "
+                "its inputs have no common steps in this stage.")
         self.headers = headers
         self.res_path = res_path
         self.open_file_name = res_path.name
@@ -369,7 +384,8 @@ class InteractiveViewer:
         paths = self.solution_paths or ((None, self.res_path),)
         frames = []
         for solution_index, (_, result_path) in enumerate(paths):
-            headers = self.headers if solution_index == self.solution_index else scan_result_headers(result_path)
+            headers = (self.headers if solution_index == self.solution_index else
+                       self._calculated_headers(scan_result_headers(result_path)))
             result_name = self.current_result if self.current_result in {header.name for header in headers} else None
             if result_name is None:
                 result_name = sorted({header.name for header in headers})[0]
@@ -455,7 +471,8 @@ class InteractiveViewer:
 
     def _load_plot_data(self):
         step = self.get_current_step()
-        if self.show_gradient or self.current_location == RESULT_LOCATION_ON_GAUSS_POINTS:
+        if (self.current_result in self.calculated_fields or self.show_gradient
+                or self.current_location == RESULT_LOCATION_ON_GAUSS_POINTS):
             result_type, values = self._load_cached_values(self.current_result, step, self.current_location or "OnNodes")
         else:
             result_type, values = load_values(self.res_path, self.current_result, step, self.current_location)
@@ -857,6 +874,19 @@ class InteractiveViewer:
     def _load_cached_values(self, result_name: str, step: int, location: str) -> Tuple[str, Dict[int, np.ndarray]]:
         key = (result_name, int(step), location)
         if key not in self.result_cache:
+            if result_name in self.calculated_fields:
+                from .expressions import FieldExpression
+
+                original = [header for header in self.headers if header.header_line >= 0]
+                expression = FieldExpression(self.calculated_fields[result_name], original)
+                values = expression.evaluate(
+                    self.node_ids,
+                    lambda name, source_location: self._load_cached_values(
+                        name, step, source_location),
+                    self.tri,
+                )
+                self.result_cache[key] = ("Scalar", values)
+                return self.result_cache[key]
             _, _, result_type, values = load_result_values(
                 self.headers,
                 self.res_path,
@@ -1414,6 +1444,7 @@ class InteractiveViewer:
             "show_profile": self.show_profile,
             "colormap": self.current_colormap,
             "active_submodelpart": self.active_filter.name if self.active_filter else None,
+            "calculated_fields": self.calculated_fields,
         }
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")

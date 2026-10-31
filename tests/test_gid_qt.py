@@ -52,6 +52,8 @@ def window(app, options):
 
 
 def test_selectors_and_controls(window, app):
+    labels = {button.text() for button in window.findChildren(QtWidgets.QPushButton)}
+    assert {"Previous step", "Next step"} <= labels
     v = window.viewer
     assert window.step.count() == 2
     assert window.step.currentText() == "2"
@@ -220,6 +222,44 @@ def test_inspection_and_toolbar(window, monkeypatch):
     window.coordinate.setText("0,0")
     window.inspect_typed()
     assert "PRESSURE" in window.report.toPlainText()
+
+
+def test_folder_step_buttons_cross_stage_boundaries(app, options, tmp_path, monkeypatch):
+    second_mesh, second_result = tmp_path / "second.post.msh", tmp_path / "second.post.res"
+    write_second_mesh(second_mesh)
+    write_second_results(second_result)
+    options["solution_paths"] = (
+        (tmp_path / "model.post.msh", options["res_path"]), (second_mesh, second_result))
+    window = GidMainWindow(**options)
+    warnings = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: warnings.append(args[2]))
+    buttons = {button.text(): button for button in window.findChildren(QtWidgets.QPushButton)}
+    try:
+        # The first stage starts at its latest step, 2.
+        buttons["Next step"].click()
+        assert window.viewer.res_path == second_result
+        assert window.viewer.get_current_step() == 1
+        assert window.solution.currentIndex() == 1
+        buttons["Previous step"].click()
+        assert window.viewer.res_path == options["res_path"]
+        assert window.viewer.get_current_step() == 2
+        buttons["Previous step"].click()
+        assert window.viewer.get_current_step() == 1
+        assert window.solution.currentIndex() == 0
+        # Folder ends wrap; a one-step stage can be navigated in either direction.
+        buttons["Previous step"].click()
+        assert window.solution.currentIndex() == 1
+        assert window.viewer.get_current_step() == 1
+        buttons["Next step"].click()
+        assert window.solution.currentIndex() == 0
+        assert window.viewer.get_current_step() == 1
+        buttons["Next step"].click()
+        assert window.viewer.get_current_step() == 2
+        assert not warnings
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
 
 
 def test_folder_play_and_lifecycle(app, options, tmp_path):

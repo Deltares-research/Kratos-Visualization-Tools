@@ -46,11 +46,18 @@ control sidebar. Result, step, location, and component selectors replace
 keyboard-only browsing. Display controls expose mesh, gradients, isolines,
 labels, profiles, and displacement deformation. Image/settings and CSV exports
 are available through visible controls, and coordinate inspection displays a
-desktop report. Previous/next controls and playback make time-step browsing
-discoverable.
+desktop report. **Previous step** and **Next step** browse time steps.
+In folder mode, reaching a stage boundary moves to the previous stage's last
+step or the next stage's first step. Navigation wraps between the folder's
+first and last stages. With a single solution, it cycles through that file's
+steps. The **Solution** dropdown still allows switching stages directly.
+Playback also supports browsing time steps across folder solutions.
 
 Both viewing modes use a compact 240-pixel control sidebar with labels above
 their fields and vertical scrolling, leaving more space for the plot.
+When browsing a folder, the Solution dropdown lists all matching solution
+filenames and its label shows their count. Full paths are available as tooltips.
+Opening a profile in the plotter leaves the complete solution list available.
 **Apply profile** applies the profile x/path and shows the profile panel
 automatically. The Profile/Profiles checkbox can hide it again.
 
@@ -336,6 +343,11 @@ python plot_saved_results.py "path\to\bundle\plot_config.json"
 The plotter runs in a separate Python process so its Matplotlib backend does
 not change the GiD Qt viewer. Launch errors are shown in the GiD window; the
 saved bundle remains available for reopening.
+If a plotter window is already open, **Open in plotter** sends the new profiles
+to it instead of opening another window. Profiles with matching axis labels
+are added to the existing graph; different quantities and differences appear
+as separate graphs in that window. The plotter's **Add profile…** button also
+imports previously saved CSVs into a selected single-axis graph.
 
 #### Command-line extraction and plotting
 

@@ -114,3 +114,51 @@ def test_empty_folder_reports_actionable_error(tmp_path, start_window, monkeypat
                         lambda *args: errors.append(args[2]))
     start_window.folder_button.click()
     assert "No matching" in errors[0]
+
+
+def test_folder_selector_keeps_every_solution_after_profile_export(
+        tmp_path, start_window, monkeypatch, app):
+    from kratos_visualization_tools.gid import qt_start
+    from kratos_visualization_tools.gid.qt_viewer import GidMainWindow
+
+    first_mesh, first_result = tmp_path / "1_first.post.msh", tmp_path / "1_first.post.res"
+    second_mesh, second_result = tmp_path / "2_second.post.msh", tmp_path / "2_second.post.res"
+    write_mesh(first_mesh)
+    write_results(first_result)
+    write_second_mesh(second_mesh)
+    write_second_results(second_result)
+    windows = []
+    errors = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: errors.append(args[2]))
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getExistingDirectory",
+                        lambda *args: str(tmp_path))
+    monkeypatch.setattr(qt_start, "render_plot_gui",
+                        lambda **options: windows.append(GidMainWindow(**options)))
+    start_window.folder_button.click()
+    window = windows[0]
+    try:
+        assert window.solution.count() == 2
+        assert [window.solution.itemText(i) for i in range(2)] == [
+            first_result.name, second_result.name]
+        assert window.solution.itemData(1) == str(second_result.resolve())
+        assert window.solution.itemData(
+            1, QtCore.Qt.ItemDataRole.ToolTipRole) == str(second_result.resolve())
+        assert window.form.labelForField(window.solution).text() == "Solution (2)"
+        window.result.setCurrentText("PRESSURE")
+        window.profile_x.setText("0")
+        window.run_action(window.apply_profile)
+        launched = []
+        monkeypatch.setattr(window, "launch_profile_plotter", launched.append)
+        window.run_action(window.open_profile_plotter)
+        window.solution.setCurrentIndex(1)
+        assert window.viewer.res_path == second_result.resolve()
+        window.run_action(window.open_profile_plotter)
+        assert not errors
+        assert len(launched) == 2
+        assert window.solution.count() == 2
+        window.solution.setCurrentIndex(0)
+        assert window.viewer.res_path == first_result.resolve()
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)

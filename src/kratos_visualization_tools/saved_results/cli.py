@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 
 from .config import CONFIG_DOC, run
 from .viewer import FigureViewer
+from .session import open_session
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,22 +56,28 @@ def main(argv: list[str] | None = None) -> int:
         print(CONFIG_DOC)
         return 0
 
+    session = None
     try:
         if args.show:
+            session = open_session(args.config, args.output_dir)
+            if session is None:
+                return 0
             plt.switch_backend("TkAgg")
         pending_figures = run(args.config, args.output_dir, show=args.show)
+        if args.show:
+            if not pending_figures:
+                print("No figures to show.")
+                return 0
+            viewer = FigureViewer(pending_figures)
+            session.attach(viewer)
+            plt.show()
     except ImportError as error:
         print(f"Error: no interactive display available ({error})", file=sys.stderr)
         return 1
-    except (KeyError, ValueError, FileNotFoundError) as error:
+    except (KeyError, ValueError, OSError, RuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
-
-    if args.show:
-        if not pending_figures:
-            print("No figures to show.")
-            return 0
-        # Keep a reference so the button callbacks stay alive while the window is open.
-        viewer = FigureViewer(pending_figures)
-        plt.show()
+    finally:
+        if session is not None:
+            session.close()
     return 0

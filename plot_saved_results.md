@@ -33,6 +33,22 @@ python plot_saved_results.py --print-schema unused.json
 **All together** or **One by one** (with **< Previous** / **Next >**), and **Save** writes
 all figures to the output directory.
 
+**Add profile…** imports one or more saved profile CSVs into the selected graph.
+In **All together** mode, click a graph to select it (its title shows
+`[selected]`); in **One by one** mode, the displayed graph is selected.
+CSV headers must include `value` and either `y_coordinate` (GiD's **Profile CSV…**)
+or `coordinate` (a profile bundle). A `series` column creates separate curves.
+Imports update the legend and are included in **Save**. Choose a single-axis
+graph; profile import into a multi-subplot figure is not supported.
+
+Only one interactive plotter window is opened per user. Subsequent `--show`
+commands, including GiD's **Open in plotter**, send their configuration to that
+window. Compatible GiD profiles (matching axis labels) are overlaid; different
+quantities and difference plots are kept in separate graphs in the same window.
+Non-profile configurations add their figures rather than overlaying them.
+Close the window to start a fresh plotting session. Restart a window opened
+with an older version before using this feature.
+
 From Python:
 
 ```python

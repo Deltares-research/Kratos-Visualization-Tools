@@ -189,9 +189,9 @@ class GidMainWindow(QtWidgets.QMainWindow):
         self.form.addRow("Deformation scale", self.scale)
         self.scale.valueChanged.connect(
             lambda value: self.run_action(lambda: self.change("deformation_scale", value)))
-        self.button("Previous", lambda: self.move_step(-1))
+        self.button("Previous step", lambda: self.move_step(-1))
         self.play = self.button("Play / pause", self.toggle_play)
-        self.button("Next", lambda: self.move_step(1))
+        self.button("Next step", lambda: self.move_step(1))
         self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.form.addRow(self.slider)
         self.slider.valueChanged.connect(
@@ -256,7 +256,17 @@ class GidMainWindow(QtWidgets.QMainWindow):
         v = self.viewer
         current_step = v.get_current_step()
         self.setWindowTitle(f"GiD Viewer — {v.open_file_name}")
-        self.set_combo(self.solution, [str(pair[1]) for pair in v.solution_paths], str(v.res_path))
+        self.solution.blockSignals(True)
+        self.solution.clear()
+        for _, result_path in v.solution_paths:
+            self.solution.addItem(result_path.name, str(result_path))
+            self.solution.setItemData(
+                self.solution.count() - 1, str(result_path), QtCore.Qt.ItemDataRole.ToolTipRole)
+        self.solution.setCurrentIndex(v.solution_index if v.solution_paths else -1)
+        self.solution.setToolTip(str(v.res_path))
+        self.form.labelForField(self.solution).setText(
+            f"Solution ({len(v.solution_paths)})")
+        self.solution.blockSignals(False)
         self.set_combo(self.result, v.result_names, v.current_result)
         headers = [h for h in v.headers if h.name == v.current_result]
         self.set_combo(self.location, sorted({h.location for h in headers}), v.current_location)
@@ -311,7 +321,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
 
     def select_solution(self, value):
         self.timer.stop()
-        index = [str(pair[1]) for pair in self.viewer.solution_paths].index(value)
+        index = self.solution.currentIndex()
         self.viewer._switch_solution(index - self.viewer.solution_index)
 
     def select_location(self, value):
@@ -327,8 +337,16 @@ class GidMainWindow(QtWidgets.QMainWindow):
 
     def move_step(self, offset):
         self.timer.stop()
-        index = (self.step.currentIndex() + offset) % self.step.count()
-        self.select_step(self.step.itemText(index))
+        index = self.step.currentIndex() + offset
+        if len(self.viewer.solution_paths) > 1 and not 0 <= index < self.step.count():
+            self.viewer.current_step_str = "latest"
+            self.viewer._switch_solution(1 if offset > 0 else -1)
+            steps = self.viewer.get_available_steps()
+            if not steps:
+                raise ValueError("No time steps are available in the selected stage.")
+            self.select_step(str(steps[0] if offset > 0 else steps[-1]))
+        else:
+            self.select_step(self.step.itemText(index % self.step.count()))
 
     def toggle_play(self):
         if self.timer.isActive():

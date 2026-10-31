@@ -410,6 +410,11 @@ class TestShow:
         psr.plt.close(viewer.figure)
 
     def test_main_with_show_opens_the_viewer(self, case_dir, monkeypatch):
+        from kratos_visualization_tools.saved_results import cli
+        from unittest.mock import Mock
+
+        session = Mock()
+        monkeypatch.setattr(cli, "open_session", lambda *args: session)
         config_path = write_config(case_dir, two_stage_single_figures)
         monkeypatch.setattr(psr.plt, "switch_backend", lambda backend: None)
         shown = []
@@ -419,6 +424,8 @@ class TestShow:
 
         assert shown == [True]
         assert not (case_dir / "plots").exists()
+        session.attach.assert_called_once()
+        session.close.assert_called_once()
 
 
 class TestMain:

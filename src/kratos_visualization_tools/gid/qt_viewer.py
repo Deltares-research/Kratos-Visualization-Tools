@@ -7,6 +7,7 @@ remain comparison-only; the single-solution engine retains automatic scaling.
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
@@ -17,6 +18,7 @@ from .config import parse_profile_path
 from .models import TENSOR_COMPONENTS, VECTOR_COMPONENTS
 from .parsing import detect_profile_nodes, scan_result_headers
 from .viewer import InteractiveViewer
+from .profile_bundle import save_profile_bundle
 
 
 class QtInteractiveViewer(InteractiveViewer):
@@ -198,6 +200,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
         self.button("Save settings…", lambda: self.save_file("settings"))
         self.profile_export = self.button("Profile CSV…", lambda: self.save_file("profile"))
         self.gradient_export = self.button("Gradient CSV…", lambda: self.save_file("gradient"))
+        self.plotter_button = self.button("Open in plotter", self.open_profile_plotter)
         self.coordinate = QtWidgets.QLineEdit()
         self.coordinate.setPlaceholderText("x,y")
         self.form.addRow("Coordinate", self.coordinate)
@@ -287,6 +290,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
         if not self.profile_path.hasFocus():
             self.profile_path.setText(";".join(f"{x},{y}" for x, y in (v.profile_path or ())))
         self.profile_export.setEnabled(v.show_profile and v.profile_values is not None)
+        self.plotter_button.setEnabled(v.show_profile and v.profile_values is not None)
         self.gradient_export.setEnabled(v.show_gradient and v.current_field_grad_x is not None)
         self.play.setText("Pause" if self.timer.isActive() else "Play")
 
@@ -351,6 +355,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
         self.viewer.profile_path = tuple(path) if path else None
         self.viewer.profile_nodes = detect_profile_nodes(
             self.viewer.all_nodes, self.viewer.line_meshes, x, self.viewer.x_tol)
+        self.viewer.show_profile = True
         self.redraw()
 
     def inspect_typed(self):
@@ -389,6 +394,54 @@ class GidMainWindow(QtWidgets.QMainWindow):
         else:
             saved = self.viewer.export_current_field_data(path, strict=True)
         self.statusBar().showMessage(f"Saved {kind}: {saved}", 10000)
+
+    def open_profile_plotter(self, *, include_difference=False):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Choose where to save the profile bundle")
+        if not folder:
+            return
+        config = save_profile_bundle(
+            self.viewer, folder, include_difference=include_difference)
+        self.statusBar().showMessage(f"Saved profile bundle: {config.parent}")
+        self.launch_profile_plotter(config)
+
+    def launch_profile_plotter(self, config):
+        # Tk/Agg backend changes in the plotter must not affect the Qt GiD viewer.
+        process = QtCore.QProcess()
+        environment = QtCore.QProcessEnvironment.systemEnvironment()
+        package_root = str(Path(__file__).resolve().parents[2])
+        existing = environment.value("PYTHONPATH")
+        environment.insert("PYTHONPATH", package_root + (";" + existing if existing else ""))
+        process.setProcessEnvironment(environment)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-m", "kratos_visualization_tools.saved_results", str(config), "--show"])
+        processes = getattr(self, "_plotter_processes", None)
+        if processes is None:
+            processes = self._plotter_processes = []
+        processes.append(process)
+
+        def report_failure(message):
+            self.statusBar().showMessage(message)
+            QtWidgets.QMessageBox.warning(self, "Saved-results plotter", message)
+
+        def finished(code, status):
+            if code != 0 or status == QtCore.QProcess.ExitStatus.CrashExit:
+                details = bytes(process.readAllStandardError()).decode(errors="replace")
+                details += bytes(process.readAllStandardOutput()).decode(errors="replace")
+                report_failure(f"Plotter failed (exit {code}).\n{details}")
+            processes.remove(process)
+            process.deleteLater()
+
+        process.finished.connect(finished)
+        def failed(error):
+            if error == QtCore.QProcess.ProcessError.FailedToStart:
+                report_failure(f"Could not run plotter: {process.errorString()}")
+                processes.remove(process)
+                process.deleteLater()
+
+        process.errorOccurred.connect(failed)
+        process.start()
 
     def closeEvent(self, event):
         self.timer.stop()

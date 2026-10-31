@@ -172,6 +172,10 @@ class GidComparisonWindow(GidMainWindow):
         self.button("Inspect", self.inspect_typed)
         self.button("Save image", lambda: self.save_file("image"))
         self.button("Save settings", lambda: self.save_file("settings"))
+        self.plotter_button = self.button("Open in plotter", self.open_profile_plotter)
+        self.difference_plotter_button = self.button(
+            "Plot + diff",
+            lambda: self.open_profile_plotter(include_difference=True))
         self.sync_controls()
 
     def sync_controls(self):
@@ -261,6 +265,7 @@ class GidComparisonWindow(GidMainWindow):
             raise ValueError("Profile coordinates must be finite.")
         self.viewer.profile_x = x
         self.viewer.profile_path = tuple(path) if path else None
+        self.viewer.show_profile = True
         self.redraw()
 
     def inspect_typed(self):

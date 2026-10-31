@@ -41,6 +41,23 @@ import plot_saved_results
 plot_saved_results.run(config_path, output_dir_override=case_dir)
 ```
 
+## Profiles from the GiD desktop viewer
+
+The GiD GUI's **Open in plotter** action automatically exports the current
+profile CSV, creates this plotter's JSON configuration, and opens its viewer.
+Comparison mode exports both profiles; **Plot + diff** also includes
+their overlapping difference in a separate figure.
+
+Keep `profile.csv` and `plot_config.json` together. All plotting paths are
+relative to the bundle, so it can be moved or shared and reopened without the
+original GiD files. The configuration's `metadata` records the original sources,
+result, actual steps, component/reduction, and profile geometry; it does not
+require those sources to exist. See the
+[GiD profile handoff](./visualize_gid_results.md#send-the-current-gui-profile-to-the-plotter)
+for usage.
+
+## Input validation
+
 Missing data files or columns produce a warning and the corresponding series is skipped;
 a figure without any data is skipped entirely. Configuration errors are reported as a
 single-line message and yield exit code 1.

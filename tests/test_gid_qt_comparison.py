@@ -95,6 +95,31 @@ def test_comparison_control_panel_is_compact(window, app):
     assert window.viewer.canvas.width() > panel.width()
 
 
+def test_apply_profile_shows_hidden_comparison_profiles(window):
+    assert not window.viewer.show_profile
+    window.profile_path.setText("0,0;0,1")
+    button = next(button for button in window.findChildren(QtWidgets.QPushButton)
+                  if button.text() == "Apply profile")
+    button.click()
+    assert window.viewer.show_profile
+    assert window.checks["show_profile"].isChecked()
+    assert window.viewer.ax1 is not None and window.viewer.ax2 is not None
+
+
+def test_comparison_plotter_buttons(window, tmp_path, monkeypatch):
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getExistingDirectory",
+                        lambda *args: str(tmp_path))
+    window.profile_path.setText("0,0;0,1")
+    window.apply_profile()
+    launched = []
+    monkeypatch.setattr(window, "launch_profile_plotter", lambda config: launched.append(config))
+    window.plotter_button.click()
+    window.difference_plotter_button.click()
+    assert len(launched) == 2
+    assert len(json.loads(launched[0].read_text())["figures"]) == 1
+    assert len(json.loads(launched[1].read_text())["figures"]) == 2
+
+
 def test_comparison_scale_profile_inspection_and_saves(window, tmp_path, monkeypatch):
     v = window.viewer
     window.minimum.setText("-2")

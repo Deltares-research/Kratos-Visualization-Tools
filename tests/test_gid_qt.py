@@ -99,6 +99,63 @@ def test_control_panel_is_compact_with_long_result_names(window, app):
     assert window.viewer.canvas.width() > panel.width()
 
 
+def test_apply_profile_shows_hidden_profile_in_folder_mode(app, options, tmp_path):
+    options["solution_paths"] = (
+        (tmp_path / "model.post.msh", options["res_path"]),)
+    window = GidMainWindow(**options)
+    try:
+        assert not window.viewer.show_profile
+        window.profile_x.setText("0.25")
+        button = next(button for button in window.findChildren(QtWidgets.QPushButton)
+                      if button.text() == "Apply profile")
+        button.click()
+        assert window.viewer.show_profile
+        assert window.checks["show_profile"].isChecked()
+        assert window.viewer.ax1 is not None
+        assert window.viewer.profile_values is not None
+        assert window.plotter_button.isEnabled()
+    finally:
+        window.close()
+        app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
+def test_open_profile_in_plotter_saves_bundle_without_changing_gid(window, tmp_path, monkeypatch):
+    window.checks["show_profile"].click()
+    assert window.plotter_button.isEnabled()
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getExistingDirectory",
+                        lambda *args: str(tmp_path))
+    launched = []
+    monkeypatch.setattr(window, "launch_profile_plotter", lambda config: launched.append(config))
+    before = window.viewer.canvas
+    window.plotter_button.click()
+    assert len(launched) == 1
+    assert (launched[0].parent / "profile.csv").is_file()
+    assert window.viewer.canvas is before
+    assert window.viewer.current_result == "PRESSURE"
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getExistingDirectory", lambda *args: "")
+    window.plotter_button.click()
+    assert len(launched) == 1
+
+
+def test_plotter_process_is_isolated_and_launch_errors_are_visible(window, tmp_path, monkeypatch, app):
+    starts = []
+    monkeypatch.setattr(QtCore.QProcess, "start", lambda process: starts.append(process))
+    config = tmp_path / "plot_config.json"
+    window.launch_profile_plotter(config)
+    process = starts[0]
+    assert process.program() == sys.executable
+    assert process.arguments() == [
+        "-m", "kratos_visualization_tools.saved_results", str(config), "--show"]
+    assert process.processEnvironment().value("PYTHONPATH")
+    messages = []
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning",
+                        lambda *args: messages.append(args[2]))
+    process.errorOccurred.emit(QtCore.QProcess.ProcessError.FailedToStart)
+    assert "Could not run plotter" in messages[0]
+    assert window._plotter_processes == []
+    app.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+
+
 def test_profile_gradient_and_files(window, tmp_path, monkeypatch):
     window.checks["show_profile"].click()
     window.profile_x.setText("0.25")

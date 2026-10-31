@@ -51,6 +51,8 @@ discoverable.
 
 Both viewing modes use a compact 240-pixel control sidebar with labels above
 their fields and vertical scrolling, leaving more space for the plot.
+**Apply profile** applies the profile x/path and shows the profile panel
+automatically. The Profile/Profiles checkbox can hide it again.
 
 Existing initial-view options, such as `--result`, `--component`, `--profile`,
 `--profile-path`, and `--settings`, can be used with `--gui`.
@@ -294,6 +296,48 @@ The generated CSV contains these columns:
 | `gradient` | Finite-difference derivative with respect to `s` |
 
 ### Plotting the extracted CSV
+
+#### Send the current GUI profile to the plotter
+
+In the single-solution desktop viewer, enable **Profile**, select the result,
+component/reduction and step, and click **Open in plotter**. Choose a parent
+folder for the generated bundle. The displayed profile values are exported
+without reloading or re-extracting the GiD data.
+
+In comparison mode, **Open in plotter** opens both solution profiles in one
+figure. **Plot + diff** additionally opens a difference figure using
+solution 2 minus solution 1 over their overlapping profile coordinates. Choose
+a usable profile x/path first; missing profiles or no overlap produce an error
+instead of an empty successful export.
+
+Each action creates a new, uniquely named folder:
+
+```text
+profile_YYYYMMDD_HHMMSS_unique\
+    profile.csv
+    plot_config.json
+```
+
+The generated configuration contains relative CSV/output paths, series filters,
+labels, and axes. Its `metadata` records source mesh/results paths, actual steps
+and locations for each solution, result, component, tensor reduction, gradient
+mode, and profile coordinates. Source paths are informational: the exported
+data is sufficient to reopen the plot without the original GiD files.
+
+Move or share the whole folder, edit the configuration to customize styling,
+and reopen it with:
+
+```powershell
+python plot_saved_results.py "path\to\bundle\plot_config.json" --show
+# Or save figures into the bundle's plots folder:
+python plot_saved_results.py "path\to\bundle\plot_config.json"
+```
+
+The plotter runs in a separate Python process so its Matplotlib backend does
+not change the GiD Qt viewer. Launch errors are shown in the GiD window; the
+saved bundle remains available for reopening.
+
+#### Command-line extraction and plotting
 
 Add `--plot-config` to plot the CSV with `plot_saved_results.py` right after it is
 written; add `--plot-show` to open its viewer window instead of saving the figures:

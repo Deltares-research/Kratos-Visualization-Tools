@@ -29,6 +29,12 @@ python visualize_gid_results.py path\to\case --gui
 
 # Browse the solutions in a folder
 python visualize_gid_results.py --folder path\to\results --gui
+
+# Compare two solutions with visible desktop controls
+python visualize_gid_results.py path\to\first --compare path\to\second --gui
+
+# Reopen saved comparison settings in the desktop interface
+python visualize_gid_results.py --settings comparison_PRESSURE_settings.json --gui
 ```
 
 After installation, `kratos-visualize-gid` also accepts `--gui`.
@@ -42,12 +48,30 @@ discoverable.
 
 Existing initial-view options, such as `--result`, `--component`, `--profile`,
 `--profile-path`, and `--settings`, can be used with `--gui`.
-The GUI is an opt-in single-solution interface, including folder browsing; it
-does not replace the comparison viewer in this first migration stage. Use the
-existing viewer without `--gui` for `--compare`. Listing, batch extraction, and
-static exports remain available without PySide6.
-Single-solution colour ranges remain automatic; `--vmin` and `--vmax` are
-comparison-only and are rejected with `--gui`.
+The GUI is opt-in for single solutions, folder browsing, and two-solution
+comparison. `--comparison` is an alias for `--compare`. Without `--gui`, the
+existing keyboard-driven viewers remain the default. Listing, batch extraction,
+and static exports remain available without PySide6. `--gui` cannot be combined
+with `--list`, `--extract-json`, or static `--save` (unless `--interactive` is
+also supplied); use the desktop Save image button for interactive exports.
+Folder browsing cannot be combined with comparison.
+
+The comparison sidebar provides:
+
+- common result and location selectors, vector components and tensor reductions;
+- `latest` (resolved independently for each solution), common numeric steps,
+  a step slider, and Previous/Next step buttons;
+- all five comparison styles, colormap, contour levels, isolines and labels;
+- mesh, domain-edge, and profile toggles, with editable profile x/path;
+- an editable shared color range and an Automatic color range button;
+- nearest-node or IDW coordinate inspection by click or typed `x,y`;
+- image and comparison-settings saves.
+
+The comparison window uses the same field loading, interpolation, difference,
+profile, and inspection calculations as the existing comparison viewer.
+Its Matplotlib toolbar supplies pan/zoom without triggering coordinate inspection.
+Single-solution color ranges remain automatic; `--vmin` and `--vmax` are
+accepted with `--gui` only in comparison mode.
 
 ## Input files
 

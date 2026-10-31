@@ -40,7 +40,7 @@ def main():
             "Accepted pairs: <name>.post.msh + <name>.post.res or <name>.msh + <name>.res"
         ),
     )
-    parser.add_argument("--compare", default="", help="Second GiD solution to compare with the positional solution")
+    parser.add_argument("--compare", "--comparison", default="", help="Second GiD solution to compare with the positional solution")
     parser.add_argument("--folder", default="", help="Folder containing multiple GiD mesh/result solution pairs")
     parser.add_argument("--settings", default="", help="Load a saved visualization settings JSON file")
     parser.add_argument("--extract-json", default="", help="JSON input for line extraction to CSV")
@@ -82,7 +82,7 @@ def main():
     parser.add_argument("--mdpa", default="", help="Optional .mdpa path for --active filtering")
     parser.add_argument("--save", default="", help="Optional output image path; if omitted, use interactive mode")
     parser.add_argument("--interactive", action="store_true", help="Force interactive mode (default if --save omitted)")
-    parser.add_argument("--gui", action="store_true", help="Use the optional PySide6 single-solution window (install .[gui])")
+    parser.add_argument("--gui", action="store_true", help="Use the optional PySide6 single-solution or comparison window (install .[gui])")
     parser.add_argument("--isolines", action="store_true", help="Show solid isolines over filled single-solution fields")
     parser.add_argument("--isoline-labels", action="store_true", help="Label isolines compactly with their values")
     parser.add_argument("--contour-levels", type=int, default=12, help="Number of isoline levels (minimum 2)")
@@ -113,12 +113,12 @@ def main():
 
     def validate_gui():
         if args.gui:
-            for incompatible in ("compare", "list", "extract_json"):
+            for incompatible in ("list", "extract_json"):
                 if getattr(args, incompatible):
                     parser.error(f"--gui cannot be used with --{incompatible.replace('_', '-')}")
             if args.save and not args.interactive:
                 parser.error("--gui cannot be used with static --save; add --interactive")
-            if args.vmin is not None or args.vmax is not None:
+            if not args.compare and not args.settings and (args.vmin is not None or args.vmax is not None):
                 parser.error("--gui manual color ranges are not yet supported; omit --vmin/--vmax")
 
     validate_gui()
@@ -129,6 +129,7 @@ def main():
 
     args.initial_show_gradient = False
     args.initial_show_mesh = False
+    args.initial_show_isolines = True
     args.initial_colormap = None
     args.initial_show_deformation = False
     args.initial_deformation_scale = 1.0
@@ -139,6 +140,7 @@ def main():
             raise FileNotFoundError(f"Settings file not found: {settings_path}")
         settings = load_visualization_settings(settings_path)
         apply_visualization_settings(args, settings)
+        args.initial_show_isolines = bool(settings.get("show_isolines", True))
         if settings["mode"] == "comparison" and not args.compare:
             solutions = settings.get("solutions")
             if not isinstance(solutions, list) or len(solutions) != 2:
@@ -152,6 +154,8 @@ def main():
             raise ValueError("Single-solution settings cannot be used with --compare.")
 
     validate_gui()
+    if args.gui and not args.compare and (args.vmin is not None or args.vmax is not None):
+        parser.error("--gui manual color ranges are comparison-only; omit --vmin/--vmax")
     if args.extract_json:
         json_path = Path(args.extract_json).expanduser().resolve()
         if not json_path.exists():
@@ -202,9 +206,19 @@ def main():
             args.result = common_names[0]
 
         use_interactive = (not args.save) or args.interactive
+        renderer = render_comparison
+        if args.gui:
+            try:
+                from .qt_comparison import render_comparison_gui
+            except ModuleNotFoundError as exc:
+                if exc.name != "PySide6" and not (exc.name or "").startswith("PySide6."):
+                    raise
+                parser.error("The Qt viewer requires PySide6. Install it with: pip install '.[gui]'")
+            renderer = render_comparison_gui
         print("Launching GiD solution comparison...")
-        print("Comparison controls: [n/p]=result, [o]=overlay style, [a]=automatic scale, [/]=scale, [w]=inspection method, [q]=quit")
-        render_comparison(
+        if not args.gui:
+            print("Comparison controls: [n/p]=result, [o]=overlay style, [a]=automatic scale, [/]=scale, [w]=inspection method, [q]=quit")
+        renderer(
             first=first,
             second=second,
             initial_result=args.result,
@@ -224,6 +238,10 @@ def main():
             contour_levels=args.contour_levels,
             show_isoline_labels=args.isoline_labels,
             profile_path=profile_path,
+            **({
+                "initial_show_mesh": args.initial_show_mesh,
+                "initial_show_isolines": args.initial_show_isolines,
+            } if args.gui else {}),
         )
         return
 

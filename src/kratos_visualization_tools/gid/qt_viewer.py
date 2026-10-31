@@ -107,6 +107,10 @@ class QtInteractiveViewer(InteractiveViewer):
 class GidMainWindow(QtWidgets.QMainWindow):
     """Widget-based controls for one solution or a folder of solution pairs."""
 
+    _render_state_names = (
+        "fig", "ax0", "ax1", "colorbars", "_profile_layout", "_click_markers",
+    )
+
     def __init__(self, **options):
         super().__init__()
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -218,7 +222,7 @@ class GidMainWindow(QtWidgets.QMainWindow):
         except (OSError, ValueError, RuntimeError) as exc:
             self.timer.stop()
             # Axes/colorbars may already have been replaced before rendering failed.
-            for name in ("fig", "ax0", "ax1", "colorbars", "_profile_layout", "_click_markers"):
+            for name in self._render_state_names:
                 previous_state[name] = getattr(self.viewer, name)
             self.viewer.__dict__.update(previous_state)
             message = str(exc)
@@ -390,11 +394,15 @@ class GidMainWindow(QtWidgets.QMainWindow):
 
 def render_plot_gui(**options):
     """Launch the optional Qt window; reuse an existing application's event loop."""
+    return _render_gui(GidMainWindow, options)
+
+
+def _render_gui(window_type, options):
     app = QtWidgets.QApplication.instance()
     owns_app = app is None
     if app is None:
         app = QtWidgets.QApplication([])
-    window = GidMainWindow(**options)
+    window = window_type(**options)
     window.show()
     # Keep the window alive when an embedding caller owns the event loop.
     windows = getattr(app, "_gid_windows", None)

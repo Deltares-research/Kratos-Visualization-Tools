@@ -109,12 +109,16 @@ Install the PySide6 interface and launch it with `--gui`:
 ```powershell
 python -m pip install -e ".[gui]"
 python visualize_gid_results.py path\to\case --gui
+
+# Compare two solutions with desktop controls
+python visualize_gid_results.py path\to\first --compare path\to\second --gui
 ```
 
 The desktop interface embeds the existing Matplotlib plot and provides visible
-controls instead of requiring hotkeys. It supports single-solution viewing and
-folder browsing (`--folder path\to\results --gui`). The existing keyboard-driven
-viewer remains the default; comparison mode continues to use that viewer.
+controls instead of requiring hotkeys. It supports single-solution viewing,
+folder browsing (`--folder path\to\results --gui`), and two-solution comparison
+(`--compare path\to\second --gui`; `--comparison` is an alias).
+The existing keyboard-driven viewer remains the default without `--gui`.
 See the [GiD documentation](./visualize_gid_results.md) for details.
 
 ## Tests

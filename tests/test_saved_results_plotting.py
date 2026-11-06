@@ -5,6 +5,26 @@ import pytest
 import plot_saved_results as psr
 
 
+@pytest.mark.parametrize("coordinate", ["x", "y"])
+def test_linear_ticks_show_full_values_without_offset(coordinate):
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        values = [-300.020, -299.995]
+        axes.plot(values if coordinate == "x" else [0, 10],
+                  values if coordinate == "y" else [0, 10])
+        primitives._apply_axis_options(axes, primitives.AxisOptions())
+        figure.canvas.draw()
+        axis = axes.xaxis if coordinate == "x" else axes.yaxis
+        assert axis.get_offset_text().get_text() == ""
+        for value, label in zip(axis.get_ticklocs(), axis.get_ticklabels()):
+            text = label.get_text().replace("\N{MINUS SIGN}", "-")
+            assert float(text) == pytest.approx(value, abs=1e-6)
+    finally:
+        primitives.plt.close(figure)
+
+
 def test_log_x_labels_are_compact_and_do_not_overlap():
     from kratos_visualization_tools.saved_results import primitives
 

@@ -183,6 +183,9 @@ Common figure options:
 
 Logarithmic x axes use compact numeric labels at 1, 2 and 5 times each
 power of ten. Minor tick labels are hidden to keep narrow pressure ranges legible.
+Linear axes show full numeric tick values without additive offsets or
+scientific-notation multipliers (for example, `-300.020` rather than `-0.020`
+with a separate `-3e2` offset).
 
 ### Series
 

@@ -6,7 +6,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter, ScalarFormatter
 import io
 import math
 from dataclasses import dataclass, field
@@ -61,6 +61,11 @@ def _apply_axis_options(axes, options: AxisOptions):
             axes.xaxis.set_minor_formatter(NullFormatter())
     if options.yscale:
         axes.set_yscale(options.yscale, nonpositive="mask")
+    for axis in (axes.xaxis, axes.yaxis):
+        if axis.get_scale() == "linear":
+            formatter = ScalarFormatter(useOffset=False)
+            formatter.set_scientific(False)
+            axis.set_major_formatter(formatter)
     if options.title:
         axes.set_title(options.title)
     if options.xlabel:

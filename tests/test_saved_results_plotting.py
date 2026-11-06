@@ -5,6 +5,29 @@ import pytest
 import plot_saved_results as psr
 
 
+def test_log_x_labels_are_compact_and_do_not_overlap():
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots(figsize=(6.4, 4.8), layout="constrained")
+    try:
+        axes.plot([100, 235], [0, 1], label="UDSM Hardening Soil")
+        axes.plot([100, 235], [0, 2], label="PLAXIS native Hardening Soil")
+        figure.legend(loc="outside center right")
+        primitives._apply_axis_options(axes, primitives.AxisOptions(xscale="log"))
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        labels = [
+            label for value, label in zip(axes.get_xticks(), axes.get_xticklabels())
+            if axes.get_xlim()[0] <= value <= axes.get_xlim()[1] and label.get_text()
+        ]
+        assert [label.get_text() for label in labels] == ["100", "200"]
+        boxes = [label.get_window_extent(renderer) for label in labels]
+        assert all(left.x1 < right.x0 for left, right in zip(boxes, boxes[1:]))
+        assert all(not label.get_text() for label in axes.get_xticklabels(minor=True))
+    finally:
+        primitives.plt.close(figure)
+
+
 def test_legacy_pending_figures_state_is_live(monkeypatch, tmp_path):
     from kratos_visualization_tools import saved_results
 

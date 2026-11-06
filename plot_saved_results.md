@@ -181,6 +181,9 @@ Common figure options:
 | `annotate_min_max` | `false` | `single` only: add a min/max box per series |
 | `node_set`, `node_ids` | — | `histories_per_node` only: the nodes to plot |
 
+Logarithmic x axes use compact numeric labels at 1, 2 and 5 times each
+power of ten. Minor tick labels are hidden to keep narrow pressure ranges legible.
+
 ### Series
 
 Each series reads either a Kratos JSON output file or a CSV/text file.

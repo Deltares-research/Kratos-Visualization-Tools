@@ -6,6 +6,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 import io
 import math
 from dataclasses import dataclass, field
@@ -54,6 +55,10 @@ def _plot_on_axis(axes, series_collection: Iterable[DataSeries]):
 def _apply_axis_options(axes, options: AxisOptions):
     if options.xscale:
         axes.set_xscale(options.xscale)
+        if options.xscale == "log":
+            axes.xaxis.set_major_locator(LogLocator(subs=(1.0, 2.0, 5.0)))
+            axes.xaxis.set_major_formatter(FuncFormatter(lambda value, position: f"{value:g}"))
+            axes.xaxis.set_minor_formatter(NullFormatter())
     if options.yscale:
         axes.set_yscale(options.yscale, nonpositive="mask")
     if options.title:

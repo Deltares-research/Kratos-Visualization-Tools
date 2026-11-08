@@ -14,8 +14,9 @@ Please perform independent review, validation, and testing before use.
 # Kratos Visualization Tools
 
 This repository contains lightweight visualization utilities for Kratos
-Multiphysics meshes and simulation output: an MDPA mesh visualizer, a GiD results
-viewer, and a configuration-driven plotter for saved results.
+Multiphysics meshes and simulation output: a viewer for MDPA SubModelParts and
+their use across project stages, a viewer for Kratos results stored in GiD
+format, and a configuration-driven plotter for saved results.
 
 ## Install
 
@@ -41,9 +42,9 @@ After installation, the equivalent console command is
 
 Legacy scripts and their documentation remain at the repository root.
 
-- [`visualize_mdpa_project.py`](./visualize_mdpa_project.md) — interactive MDPA mesh visualizer
-- [`visualize_gid_results.py`](./visualize_gid_results.md) — GiD mesh and results visualizer
-- [`plot_saved_results.py`](./plot_saved_results.md) — plot saved Kratos results
+- [`visualize_mdpa_project.py`](./visualize_mdpa_project.md) — interactively explore MDPA SubModelParts and, using project/stage JSON, their (de)activation and references in solver domain lists, processes, operations etc.
+- [`visualize_gid_results.py`](./visualize_gid_results.md) — visualize Kratos results stored in GiD `.post.msh` and `.post.res` files
+- [`plot_saved_results.py`](./plot_saved_results.md) — plot results saved in JSON and CSV files; also plots profiles extracted by `visualize_gid_results.py`
 
 All three implementations are organized under `src/kratos_visualization_tools/`:
 `mdpa.py` parses mesh data, `project.py` reads project parameters,

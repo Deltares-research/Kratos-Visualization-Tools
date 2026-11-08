@@ -1,7 +1,8 @@
 # `visualize_gid_results.py`
 
-Standalone viewer and extractor for GiD mesh and result files. The script reads a GiD
-`.post.msh` mesh together with a matching `.post.res` result file and can:
+Standalone viewer and extractor for Kratos simulation results stored in GiD format.
+The script reads a GiD `.post.msh` mesh together with a matching `.post.res` result
+file and can:
 
 - list available result names, locations and steps;
 - display scalar, vector or matrix results on the mesh;

@@ -9,6 +9,7 @@ already on disk: Kratos JSON output files, comparison CSV/text files and (option
 
 No Kratos import, no simulation run — only `matplotlib` is required. What is plotted is
 described entirely by a JSON input file, so new plots need no code changes.
+`visualize_gid_results.py` also uses this plotter to display extracted profiles.
 
 After installation, `kratos-plot-saved-results` accepts the same arguments as
 `python plot_saved_results.py`. The implementation lives in

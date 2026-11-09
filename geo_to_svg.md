@@ -105,8 +105,11 @@ The MDPA reader converts the Kratos model into the same internal model as a GEO 
   Entities in no SubModelPart are grouped by their Kratos type name (e.g.
   `UPwSmallStrainElement2D3N`).
 - Edges shared by adjacent elements of the same group are hidden, so each
-  SubModelPart appears as one region. Each region's fill is a single SVG path,
-  so no seams show between elements.
+  SubModelPart appears as one region. Only each region's outer outline (and
+  holes) is written, with points on straight runs (e.g. mid-side nodes) dropped,
+  so the SVG size depends on the outline length rather than the element count
+  and no seams show between elements. Each curve group is one path; coincident
+  segments, such as both faces of an interface element, are drawn once.
 - An element or condition that belongs to several SubModelParts (e.g. an
   `interface_aggregate` group) is drawn only once. It goes to the first group
   listed in the legend config; otherwise to the smallest group, so aggregate

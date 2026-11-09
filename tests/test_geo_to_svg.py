@@ -1073,10 +1073,12 @@ def test_mdpa_rendering_preserves_region_borders_legend_and_symbols(
     surfaces = root.find(f"{SVG}g[@id='physical_surfaces']")
     fills = [path for path in surfaces.findall(f"{SVG}path") if path.attrib["stroke"] == "none"]
     assert len(fills) == 2
-    assert all(path.attrib["d"].count("Z") == 2 for path in fills)
+    assert all(path.attrib["d"].count("Z") == 1 for path in fills)
     borders = [path for path in surfaces.findall(f"{SVG}path") if path.attrib["fill"] == "none"]
     assert len(borders) == 1
-    assert borders[0].attrib["d"].count("M") == 4
+    assert borders[0].attrib["d"].count("M") == 1
+    assert borders[0].attrib["d"].count("L") == 3
+    assert fills[0].attrib["d"] == borders[0].attrib["d"]
     assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1
     assert root.findall(f"{SVG}g[@id='supports_and_loads']/{SVG}line")
     assert root.find(f"{SVG}g[@id='supports_and_loads']/{SVG}path") is not None
@@ -1247,14 +1249,14 @@ def _surface_paths(output):
 
 
 @pytest.mark.parametrize(
-    ("surfaces_cfg", "fill_count", "border_segments"),
+    ("surfaces_cfg", "fill_count", "corner_counts"),
     [
-        ([{"names": ["Left", "Right"], "label": "Stages"}], 2, [6]),
+        ([{"names": ["Left", "Right"], "label": "Stages"}], 2, [4]),
         (None, 4, [4, 4]),
     ],
 )
 def test_geo_to_svg_merges_grouped_regions_into_one_outline(
-    tmp_path, surfaces_cfg, fill_count, border_segments
+    tmp_path, surfaces_cfg, fill_count, corner_counts
 ):
     output = tmp_path / "merged.svg"
 
@@ -1265,7 +1267,29 @@ def test_geo_to_svg_merges_grouped_regions_into_one_outline(
 
     fills, borders = _surface_paths(output)
     assert len(fills) == fill_count
-    assert sorted(path.attrib["d"].count("M") for path in borders) == border_segments
+    assert all(path.attrib["d"].count("M") == 1 for path in borders)
+    assert sorted(path.attrib["d"].count("L") + 1 for path in borders) == corner_counts
+
+
+def test_geo_to_svg_fills_from_outline_and_keeps_holes(tmp_path):
+    output = tmp_path / "hole.svg"
+    model = converter.GeoModel(
+        points={
+            1: (0, 0), 2: (4, 0), 3: (4, 4), 4: (0, 4),
+            5: (1, 1), 6: (3, 1), 7: (3, 3), 8: (1, 3),
+        },
+        splines={1: [1, 2, 3, 4, 1], 2: [5, 6, 7, 8, 5]},
+        curve_loops={1: [1], 2: [2]},
+        plane_surfaces={1: [1, 2]},
+        physical_surfaces={"Ring": [1]},
+    )
+
+    converter.geo_to_svg(model, output, 400, 400, 20)
+
+    fills, borders = _surface_paths(output)
+    assert {path.attrib["d"].count("Z") for path in fills} == {2}
+    assert all(path.attrib["fill-rule"] == "evenodd" for path in fills)
+    assert borders[0].attrib["d"].count("M") == 2
 
 
 def test_geo_to_svg_draws_shared_surfaces_and_curves_once(tmp_path):
@@ -1282,3 +1306,60 @@ def test_geo_to_svg_draws_shared_surfaces_and_curves_once(tmp_path):
     assert len(borders) == 2
     root = ET.parse(output).getroot()
     assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1
+
+
+def test_chain_segments_joins_open_and_closed_chains():
+    segments = [
+        ((1, 0), (2, 0)), ((0, 0), (1, 0)),
+        ((5, 5), (6, 5)), ((6, 5), (6, 6)), ((6, 6), (5, 5)),
+    ]
+
+    chains = converter._chain_segments(segments)
+
+    assert sorted(len(chain) for chain in chains) == [3, 4]
+    open_chain = next(chain for chain in chains if len(chain) == 3)
+    assert {open_chain[0], open_chain[-1]} == {(0, 0), (2, 0)}
+    closed_chain = next(chain for chain in chains if len(chain) == 4)
+    assert closed_chain[0] == closed_chain[-1]
+
+
+@pytest.mark.parametrize(
+    ("points", "expected"),
+    [
+        ([(0, 0), (1, 0)], [(0, 0), (1, 0)]),
+        ([(0, 0), (1, 0.01), (2, 0)], [(0, 0), (2, 0)]),
+        ([(0, 0), (1, 1), (2, 0)], [(0, 0), (1, 1), (2, 0)]),
+        ([(0, 0), (2, 0), (1, 0)], [(0, 0), (2, 0), (1, 0)]),
+        ([(0, 0), (0, 0), (1, 0)], [(0, 0), (1, 0)]),
+        (
+            [(1, 0), (2, 0), (2, 1), (0, 1), (0, 0), (1, 0)],
+            [(2, 0), (2, 1), (0, 1), (0, 0), (2, 0)],
+        ),
+    ],
+)
+def test_drop_collinear_removes_only_points_on_straight_runs(points, expected):
+    assert converter._drop_collinear(points) == expected
+
+
+def test_path_data_closes_loops_and_skips_degenerate_polylines():
+    assert converter._path_data([
+        [(0, 0), (1, 0), (1, 1), (0, 0)],
+        [(5, 5), (5.01, 5.01)],
+        [(0, 2), (1, 2)],
+    ]) == "M0.0,0.0L1.0,0.0L1.0,1.0ZM0.0,2.0L1.0,2.0"
+
+
+def test_geo_to_svg_draws_coincident_interface_faces_once(tmp_path):
+    output = tmp_path / "interface.svg"
+    model = converter.GeoModel(
+        points={1: (0, 0), 2: (1, 0), 3: (2, 0), 4: (0, 0), 5: (1, 0), 6: (2, 0)},
+        splines={1: [1, 2], 2: [2, 3], 3: [4, 5], 4: [5, 6]},
+        physical_curves={"Interface": [1, 2, 3, 4]},
+    )
+
+    converter.geo_to_svg(model, output, 400, 300, 20)
+
+    paths = ET.parse(output).getroot().findall(f"{SVG}g[@id='physical_curves']/{SVG}path")
+    assert len(paths) == 1
+    assert paths[0].attrib["d"].count("M") == 1
+    assert paths[0].attrib["d"].count("L") == 1

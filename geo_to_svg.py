@@ -1036,6 +1036,107 @@ def _pattern_defs(svg: ET.Element) -> None:
     })
 
 
+Point = Tuple[float, float]
+Segment = Tuple[Point, Point]
+
+
+def _point_key(point: Point) -> Point:
+    return (round(point[0], 9), round(point[1], 9))
+
+
+def _segment_key(segment: Segment) -> Tuple[Point, Point]:
+    a, b = _point_key(segment[0]), _point_key(segment[1])
+    return (a, b) if a <= b else (b, a)
+
+
+def _chain_segments(segments: List[Segment]) -> List[List[Point]]:
+    """Join segments that share end points into polylines.
+
+    Closed chains end at their start point. Open chains start at odd-degree
+    vertices so that they are not split unnecessarily.
+    """
+    adjacency: Dict[Point, List[int]] = {}
+    point_at: Dict[Point, Point] = {}
+    for idx, (a, b) in enumerate(segments):
+        for p in (a, b):
+            key = _point_key(p)
+            adjacency.setdefault(key, []).append(idx)
+            point_at.setdefault(key, p)
+
+    used = [False] * len(segments)
+    starts = [key for key, ids in adjacency.items() if len(ids) % 2] + list(adjacency)
+    chains: List[List[Point]] = []
+    for start in starts:
+        while True:
+            current = start
+            chain = [point_at[start]]
+            while True:
+                ids = adjacency[current]
+                while ids and used[ids[-1]]:
+                    ids.pop()
+                if not ids:
+                    break
+                idx = ids.pop()
+                used[idx] = True
+                a, b = segments[idx]
+                nxt = b if _point_key(a) == current else a
+                chain.append(nxt)
+                current = _point_key(nxt)
+            if len(chain) < 2:
+                break
+            chains.append(chain)
+    return chains
+
+
+def _is_on_segment(a: Point, b: Point, c: Point, tolerance: float) -> bool:
+    """True if ``b`` lies within ``tolerance`` of the segment from ``a`` to ``c``."""
+    dx, dy = c[0] - a[0], c[1] - a[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq == 0.0:
+        return False
+    t = ((b[0] - a[0]) * dx + (b[1] - a[1]) * dy) / length_sq
+    offset = abs(dx * (b[1] - a[1]) - dy * (b[0] - a[0])) / math.sqrt(length_sq)
+    return 0.0 <= t <= 1.0 and offset <= tolerance
+
+
+def _drop_collinear(points: List[Point], tolerance: float = 0.05) -> List[Point]:
+    """Remove points lying within ``tolerance`` (SVG px) of the straight line between neighbours."""
+    if len(points) < 3:
+        return list(points)
+    kept = [points[0]]
+    for b, c in zip(points[1:-1], points[2:]):
+        if not _is_on_segment(kept[-1], b, c, tolerance):
+            kept.append(b)
+    kept.append(points[-1])
+    closed = math.dist(kept[0], kept[-1]) <= 1e-6
+    if closed and len(kept) > 4 and _is_on_segment(kept[-2], kept[0], kept[1], tolerance):
+        kept = kept[1:-1] + [kept[1]]
+    return kept
+
+
+def _path_data(polylines: List[List[Point]]) -> str:
+    """Compact SVG path data; polylines whose ends coincide are closed with Z."""
+    parts: List[str] = []
+    for points in polylines:
+        coords: List[str] = []
+        for x, y in _drop_collinear(points):
+            coord = f"{x:.1f},{y:.1f}"
+            if not coords or coords[-1] != coord:
+                coords.append(coord)
+        if len(coords) < 2:
+            continue
+        closed = len(coords) > 2 and coords[0] == coords[-1]
+        if closed:
+            coords.pop()
+        parts.append("M" + "L".join(coords) + ("Z" if closed else ""))
+    return "".join(parts)
+
+
+def _polygon_edges(poly: List[Point]) -> List[Segment]:
+    pts = poly[:-1] if len(poly) > 1 and poly[0] == poly[-1] else list(poly)
+    return [(pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts))]
+
+
 def _svg_transform(
     xmin: float, xmax: float, ymin: float, ymax: float,
     width: int, height: int, padding: int,
@@ -1117,11 +1218,26 @@ def geo_to_svg(
         if not all_polys:
             continue
 
-        # evenodd keeps holes (inner loops of a plane surface) unfilled.
-        fill_d = " ".join(
-            "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in (tr(p) for p in poly)) + " Z"
-            for poly in all_polys
-        )
+        # Outer boundary: edges that appear in exactly one polygon of this
+        # region. Internal shared edges are counted twice and suppressed.
+        edge_count: Dict[Tuple[Point, Point], int] = {}
+        edge_world: Dict[Tuple[Point, Point], Segment] = {}
+        for poly in all_polys:
+            for edge in _polygon_edges(poly):
+                key = _segment_key(edge)
+                edge_count[key] = edge_count.get(key, 0) + 1
+                edge_world.setdefault(key, edge)
+        boundary = [edge_world[key] for key, cnt in edge_count.items() if cnt == 1]
+        chains = _chain_segments(boundary)
+        outlines = [[tr(p) for p in chain] for chain in chains]
+
+        # With evenodd, the closed boundary loops fill exactly the polygons'
+        # union (minus holes), so the per-element polygons are not written.
+        # Fall back to them if the boundary does not form closed loops.
+        if chains and all(_point_key(c[0]) == _point_key(c[-1]) for c in chains):
+            fill_d = _path_data(outlines)
+        else:
+            fill_d = _path_data([[tr(p) for p in poly] for poly in all_polys])
         for fill, opacity in ((color, "0.25"), (f"url(#{pat})", "0.45")):
             ET.SubElement(g_surfaces, f"{{{SVG_NS}}}path", {
                 "d": fill_d,
@@ -1131,34 +1247,9 @@ def geo_to_svg(
                 "stroke": "none",
             })
 
-        # Find the outer boundary: edges that appear in exactly one polygon of
-        # this region. Internal shared edges are counted twice and suppressed.
-        edge_count: Dict[Tuple[Tuple[float, float], Tuple[float, float]], int] = {}
-        edge_world: Dict[Tuple[Tuple[float, float], Tuple[float, float]], Tuple[Tuple[float, float], Tuple[float, float]]] = {}
-        for poly in all_polys:
-            pts_open = poly[:-1] if len(poly) > 1 and poly[0] == poly[-1] else list(poly)
-            n = len(pts_open)
-            for i in range(n):
-                p1 = pts_open[i]
-                p2 = pts_open[(i + 1) % n]
-                rp1 = (round(p1[0], 9), round(p1[1], 9))
-                rp2 = (round(p2[0], 9), round(p2[1], 9))
-                key = (rp1, rp2) if rp1 <= rp2 else (rp2, rp1)
-                edge_count[key] = edge_count.get(key, 0) + 1
-                if key not in edge_world:
-                    edge_world[key] = (p1, p2)
-
-        boundary_segs: List[str] = []
-        for key, cnt in edge_count.items():
-            if cnt == 1:
-                p1, p2 = edge_world[key]
-                x1, y1 = tr(p1)
-                x2, y2 = tr(p2)
-                boundary_segs.append(f"M{x1:.1f},{y1:.1f}L{x2:.1f},{y2:.1f}")
-
-        if boundary_segs:
+        if outlines:
             ET.SubElement(g_surfaces, f"{{{SVG_NS}}}path", {
-                "d": " ".join(boundary_segs),
+                "d": _path_data(outlines),
                 "fill": "none",
                 "stroke": color,
                 "stroke-width": "1.2",
@@ -1166,22 +1257,28 @@ def geo_to_svg(
                 "stroke-linejoin": "round",
             })
 
+    # One path per curve group; coincident segments (e.g. both faces of a
+    # zero-thickness interface) are drawn once and connected ones are chained.
     for name in curve_names:
-        style_key = legend_spec.curve_style_by_name.get(name, name)
-        color = _hash_color(style_key)
+        segments: Dict[Tuple[Point, Point], Segment] = {}
         for cid in curve_ids[name]:
             seg = _entity_polyline(model, cid)
-            if len(seg) < 2:
-                continue
-            pts = [tr(p) for p in seg]
-            path_d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
-            ET.SubElement(g_curves, f"{{{SVG_NS}}}path", {
-                "d": path_d,
-                "fill": "none",
-                "stroke": color,
-                "stroke-width": "2.5",
-                "stroke-linecap": "round",
-            })
+            for p1, p2 in zip(seg, seg[1:]):
+                key = _segment_key((p1, p2))
+                if key[0] != key[1]:
+                    segments.setdefault(key, (p1, p2))
+        path_d = _path_data([[tr(p) for p in chain] for chain in _chain_segments(list(segments.values()))])
+        if not path_d:
+            continue
+        style_key = legend_spec.curve_style_by_name.get(name, name)
+        ET.SubElement(g_curves, f"{{{SVG_NS}}}path", {
+            "d": path_d,
+            "fill": "none",
+            "stroke": _hash_color(style_key),
+            "stroke-width": "2.5",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+        })
 
     symbols_cfg = (legend_cfg or {}).get("symbols", {}) if isinstance(legend_cfg, dict) else {}
 

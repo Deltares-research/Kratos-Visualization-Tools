@@ -992,3 +992,200 @@ def test_build_legend_spec_preserves_sorted_defaults(config):
     assert spec.curve_style_by_name == {"A": "A", "Z": "Z"}
     assert spec.surface_style_by_name == {"Clay": "Clay", "Sand": "Sand"}
     assert (spec.max_curve_items, spec.max_surface_items) == (18, 18)
+
+
+@pytest.fixture
+def mdpa_svg_input(tmp_path):
+    source = tmp_path / "model.mdpa"
+    source.write_text(
+        """Begin Nodes
+1 0 0 0
+2 1 0 0
+3 0 1 0
+4 1 1 0
+5 0.5 0 0
+End Nodes
+Begin Elements Element2D3N
+1 0 1 2 3
+2 0 2 4 3
+End Elements
+Begin Conditions LineCondition2D3N
+1 0 1 2 5
+End Conditions
+Begin SubModelPart Soil
+Begin SubModelPartElements
+1
+2
+End SubModelPartElements
+End SubModelPart
+Begin SubModelPart Bottom
+Begin SubModelPartConditions
+1
+End SubModelPartConditions
+End SubModelPart
+Begin SubModelPart NodesOnly
+Begin SubModelPartNodes
+1
+2
+End SubModelPartNodes
+End SubModelPart
+""",
+        encoding="utf-8",
+    )
+    return source
+
+
+def test_parse_mdpa_maps_submodelpart_membership_and_quadratic_condition(mdpa_svg_input):
+    model = converter.parse_mdpa(mdpa_svg_input)
+
+    assert model.points[5] == (0.5, 0)
+    assert model.physical_surfaces == {"Soil": [1, 2]}
+    assert set(model.physical_curves) == {"Bottom"}
+    assert converter._curve_points_by_name(model, ["Bottom"]) == [
+        [(0, 0), (0.5, 0), (1, 0)],
+    ]
+    assert converter._loop_to_polygon_points(model, 1) == [
+        (0, 0), (1, 0), (0, 1), (0, 0),
+    ]
+    assert "NodesOnly" not in model.physical_curves
+
+
+def test_mdpa_rendering_preserves_region_borders_legend_and_symbols(
+    mdpa_svg_input, tmp_path
+):
+    output = tmp_path / "mdpa.svg"
+    model = converter.parse_mdpa(mdpa_svg_input)
+
+    converter.geo_to_svg(
+        model, output, 400, 300, 20,
+        legend_cfg={
+            "surfaces": [{"name": "Soil", "label": "Ground"}],
+            "curves": [{"name": "Bottom", "label": "Fixed base"}],
+            "phreatic_line": {"points": [[0, 0.5], [1, 0.5]]},
+        },
+    )
+
+    root = ET.parse(output).getroot()
+    surfaces = root.find(f"{SVG}g[@id='physical_surfaces']")
+    assert len(surfaces.findall(f"{SVG}polygon")) == 4
+    borders = surfaces.findall(f"{SVG}path")
+    assert len(borders) == 1
+    assert borders[0].attrib["d"].count("M") == 4
+    assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1
+    assert root.findall(f"{SVG}g[@id='supports_and_loads']/{SVG}line")
+    assert root.find(f"{SVG}g[@id='supports_and_loads']/{SVG}path") is not None
+    labels = [node.text for node in root.findall(f"{SVG}g[@id='legend']/{SVG}text")]
+    assert "Ground" in labels
+    assert "Fixed base" in labels
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "node_ids", "expected_path", "is_surface"),
+    [
+        ("Element2D3N", "1 2 3", [1, 2, 3, 1], True),
+        ("Element2D4N", "1 2 3 4", [1, 2, 3, 4, 1], True),
+        ("SmallStrainUPwDiffOrderElement2D6N", "1 2 3 4 5 6", [1, 4, 2, 5, 3, 6, 1], True),
+        (
+            "SmallStrainUPwDiffOrderElement2D8N", "1 2 3 4 5 6 7 8",
+            [1, 5, 2, 6, 3, 7, 4, 8, 1], True,
+        ),
+        ("LineElement2D2N", "1 2", [1, 2], False),
+        ("LinearTimoshenkoBeamElement2D3N", "1 2 3", [1, 3, 2], False),
+    ],
+)
+def test_parse_mdpa_reuses_geometry_paths_and_type_name_fallback(
+    tmp_path, entity_type, node_ids, expected_path, is_surface
+):
+    source = tmp_path / "geometry.mdpa"
+    source.write_text(
+        "Begin Nodes\n"
+        + "".join(f"{i} {i} {i % 2} 0\n" for i in range(1, 9))
+        + f"End Nodes\nBegin Elements {entity_type}\n1 0 {node_ids}\nEnd Elements\n",
+        encoding="utf-8",
+    )
+
+    model = converter.parse_mdpa(source)
+
+    assert model.splines[1] == expected_path
+    groups = model.physical_surfaces if is_surface else model.physical_curves
+    assert groups == {entity_type: [1]}
+
+
+def test_parse_mdpa_preserves_multiple_memberships(mdpa_svg_input):
+    with mdpa_svg_input.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "Begin SubModelPart Other\nBegin SubModelPartElements\n1\n"
+            "End SubModelPartElements\nEnd SubModelPart\n"
+        )
+
+    model = converter.parse_mdpa(mdpa_svg_input)
+
+    assert model.physical_surfaces == {"Other": [1], "Soil": [1, 2]}
+
+
+def test_parse_mdpa_preserves_both_interface_faces(tmp_path):
+    source = tmp_path / "interface.mdpa"
+    source.write_text(
+        "Begin Nodes\n"
+        + "".join(f"{i} {i} 0 0\n" for i in range(1, 7))
+        + "End Nodes\nBegin Elements Geo_UPwLineInterfacePlaneStrainDiffOrderElement3Plus3N\n"
+        "1 0 1 2 3 4 5 6\nEnd Elements\n",
+        encoding="utf-8",
+    )
+
+    model = converter.parse_mdpa(source)
+
+    assert model.splines == {1: [1, 3, 2], 2: [4, 6, 5]}
+    assert list(model.physical_curves.values()) == [[1, 2]]
+    assert not model.physical_surfaces
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("", "No nodes parsed from MDPA"),
+        ("Begin Nodes\n1 0 0 0\nEnd Nodes\n", "No elements or conditions"),
+        (
+            "Begin Nodes\n1 0 0 0\nEnd Nodes\n"
+            "Begin Elements Element2D3N\n1 0 1 2 3\nEnd Elements\n",
+            "Elements 1 references missing nodes",
+        ),
+        (
+            "Begin Nodes\n1 0 0 0\n2 1 0 0\n3 0 1 0\n4 0 0 1\nEnd Nodes\n"
+            "Begin Elements Element3D4N\n1 0 1 2 3 4\nEnd Elements\n",
+            "Elements 1: Unknown geometry",
+        ),
+    ],
+)
+def test_parse_mdpa_reports_missing_or_unsupported_geometry(tmp_path, text, message):
+    source = tmp_path / "invalid.mdpa"
+    source.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        converter.parse_mdpa(source)
+
+
+def test_main_converts_mdpa_with_existing_legend_config(
+    mdpa_svg_input, tmp_path, monkeypatch, capsys
+):
+    source = mdpa_svg_input.with_suffix(".MDPA")
+    mdpa_svg_input.rename(source)
+    output = tmp_path / "nested" / "mdpa.svg"
+    config = tmp_path / "legend.json"
+    config.write_text(json.dumps({"legend": {
+        "surfaces": [{"name": "Soil", "label": "Ground"}],
+    }}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "geo_to_svg.py", "--input", str(source), "--output", str(output),
+        "--width", "400", "--height", "300", "--padding", "20",
+        "--legend-config", str(config),
+    ])
+
+    converter.main()
+
+    root = ET.parse(output).getroot()
+    assert root.attrib["viewBox"] == "0 0 400 300"
+    assert any(node.text == "Ground" for node in root.iter())
+    stdout = capsys.readouterr().out
+    assert f"Wrote SVG: {output}" in stdout
+    assert "Physical curves=1, physical surfaces=1" in stdout

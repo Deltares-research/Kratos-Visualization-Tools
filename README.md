@@ -16,7 +16,8 @@ Please perform independent review, validation, and testing before use.
 This repository contains lightweight visualization utilities for Kratos
 Multiphysics meshes and simulation output: a viewer for MDPA SubModelParts and
 their use across project stages, a viewer for Kratos results stored in GiD
-format, and a configuration-driven plotter for saved results.
+format, a configuration-driven plotter for saved results, and an SVG exporter
+for 2D model pictures from Gmsh or MDPA input.
 
 ## Install
 
@@ -42,11 +43,24 @@ After installation, the equivalent console command is
 
 Legacy scripts and their documentation remain at the repository root.
 
+- [`geo_to_svg.py`](./geo_to_svg.md) — export a styled 2D SVG picture (regions,
+  curves, supports, loads, phreatic line and a configurable legend) from Gmsh
+  `.geo`/`.msh` or Kratos `.mdpa` input:
+
+  ```bash
+  python geo_to_svg.py --input model.mdpa --output model.svg --legend-config legend.json
+  ```
+
+  GEO/MSH input needs only the standard library; MDPA input reuses the package
+  MDPA parser. In MDPA mode, SubModelParts with elements or conditions become
+  drawable groups; node-only SubModelParts are not drawn.
+
 - [`visualize_mdpa_project.py`](./visualize_mdpa_project.md) — interactively explore MDPA SubModelParts and, using project/stage JSON, their (de)activation and references in solver domain lists, processes, operations etc.
 - [`visualize_gid_results.py`](./visualize_gid_results.md) — visualize Kratos results stored in GiD `.post.msh` and `.post.res` files
 - [`plot_saved_results.py`](./plot_saved_results.md) — plot results saved in JSON and CSV files; also plots profiles extracted by `visualize_gid_results.py`
 
-All three implementations are organized under `src/kratos_visualization_tools/`:
+The three interactive and plotting tools are organized under `src/kratos_visualization_tools/`
+(`geo_to_svg.py` is a standalone root script that only imports the MDPA parser):
 `mdpa.py` parses mesh data, `project.py` reads project parameters,
 `visualization.py` provides the interactive UI, and `cli.py` handles command-line
 execution. The `gid/` subpackage separates GiD parsing, result loading,

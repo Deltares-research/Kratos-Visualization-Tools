@@ -5,7 +5,7 @@
     "top_left": [920, 20],
     "curves": [
       {
-        "names": ["ground_left_boundary", "slaag_1_boundary", "slaag_2_boundary", "slaag_3_boundary", "slaag_4_boundary", "slaag_5_boundary", "slaag_6_boundary"], 
+        "names": ["ground_left_boundary", "Slag_1_boundary", "Slag_2_boundary", "Slag_3_boundary", "Slag_4_boundary", "Slag_5_boundary", "Slag_6_boundary"],
         "label": "Left Boundary"
       },
       {
@@ -13,7 +13,7 @@
         "label": "Right Boundary"
       },
       {
-        "names": ["sheetpile_1_8", "sheetpile_9"], 
+        "names": ["sheetpile_lower", "sheetpile_upper", "sheetpile_aggregate"],
         "label": "Sheetpile"
       },
       {
@@ -21,8 +21,8 @@
         "label": "Water Pressure Boundary"
       },
       {
-        "name": "water_loads",
-        "label": "Water Loads"
+        "name": "crest_surcharge",
+        "label": "Crest Surcharge"
       },
       {
         "names": ["kraan_load_p1", "kraan_load_p2"], 
@@ -46,8 +46,10 @@
       },
       {
         "names": [
-          "soil_3_veen_SS_left",
-          "soil_3_veen_SS_right"
+          "soil_3_veen_SS_left_sheetpile_lower",
+          "soil_3_veen_SS_right_sheetpile_lower",
+          "soil_3_veen_SS_left_sheetpile_upper",
+          "soil_3_veen_SS_right_sheetpile_upper"
         ],
         "label": "Veen Layer"
       },
@@ -60,8 +62,8 @@
       },
       {
         "names": [
-          "soil_5_klei_SS_left",
-          "soil_5_klei_SS_right"
+          "soil_5_klei_diep_left",
+          "soil_5_klei_diep_right"
         ],
         "label": "Klei Layer 2"
       },
@@ -82,23 +84,23 @@
         "label": "Excavation Top layer"
       },
       {
-        "names": ["slaag_1_excavation_left","slaag_1_excavation_right"],
+        "names": ["Slag_1_excavation_left", "Slag_1_excavation_right"],
         "label": "Replacable Top Layer "
       },
       {
-        "names": ["slaag_7_excavation_left1","slaag_8_excavation_left1"],
+        "names": ["Slag_7_aanbrengen_left1", "Slag_8_aanbrengen_left1"],
         "label": "Temporary Embarkment"
       },
 	  {
-        "names": ["slaag_1_aanbrengen_left", "slaag_1_aanbrengen_right", "slaag_2_aanbrengen_left", "slaag_2_aanbrengen_right", "slaag_3_aanbrengen_left", "slaag_3_aanbrengen_right", "slaag_4_aanbrengen_left", "slaag_4_aanbrengen_right", "slaag_5_aanbrengen_left", "slaag_5_aanbrengen_right", "slaag_6_aanbrengen_left", "slaag_6_aanbrengen_right", "slaag_7_aanbrengen_left2", "slaag_7_aanbrengen_right", "slaag_8_aanbrengen_left2", "slaag_8_aanbrengen_right", "slaag_9_aanbrengen_left", "slaag_9_aanbrengen_right"],
+        "names": ["Slag_1_aanbrengen_left", "Slag_1_aanbrengen_right", "Slag_2_aanbrengen_left", "Slag_2_aanbrengen_right", "Slag_3_aanbrengen_left", "Slag_3_aanbrengen_right", "Slag_4_aanbrengen_left", "Slag_4_aanbrengen_right", "Slag_5_aanbrengen_left", "Slag_5_aanbrengen_right", "Slag_6_aanbrengen_left", "Slag_6_aanbrengen_right", "Slag_7_aanbrengen_left2", "Slag_7_aanbrengen_right", "Slag_8_aanbrengen_left2", "Slag_8_aanbrengen_right", "Slag_9_aanbrengen_left", "Slag_9_aanbrengen_right"],
         "label": "Embarkment "
       }
     ],
     "symbols": {
       "bottom_hatch_curves": ["Bottom"],
-      "left_fixity_curves": ["ground_left_boundary"],
+      "left_fixity_curves": ["ground_left_boundary", "Slag_1_boundary", "Slag_2_boundary", "Slag_3_boundary", "Slag_4_boundary", "Slag_5_boundary", "Slag_6_boundary"],
       "right_fixity_curves": ["ground_right_boundary"],
-      "load_arrow_curves": ["kraan_load_p1", "kraan_load_p2", "water_loads"]
+      "load_arrow_curves": ["kraan_load_p1", "kraan_load_p2", "crest_surcharge"]
     },
     "phreatic_line": {
       "label": "Phreatic Line",

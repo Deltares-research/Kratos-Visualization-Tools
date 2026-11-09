@@ -1,5 +1,5 @@
 ﻿#!/usr/bin/env python3
-"""Convert a Gmsh .geo/.msh file into an SVG preview.
+"""Convert a Gmsh .geo/.msh or Kratos .mdpa file into an SVG preview.
 
 Features:
 - Draws physical curves (conditions) with distinct colors.
@@ -7,9 +7,11 @@ Features:
 - If input is .msh, draws each mesh element with a distinct fill color.
 - Supports common GEO entities used in 2D profiles: Point, Line, Spline,
   Curve Loop / Line Loop, Plane Surface, Physical Curve/Line/Surface.
-- Standalone, standard-library implementation with shared GEO/MSH SVG helpers.
+- MDPA input reuses the package parser and draws SubModelParts as regions/curves.
+- GEO/MSH input requires only the standard library.
 
 Usage:
+  python geo_to_svg.py --input model.mdpa --output model.svg
   python Eemdijk/tools/geo_to_svg.py --input Eemdijk/eemdijk.geo --output Eemdijk/Pictures/eemdijk_geo.svg
     python Eemdijk/tools/geo_to_svg.py --input Eemdijk/eemdijk.msh --output Eemdijk/Pictures/eemdijk_mesh.svg
 
@@ -37,6 +39,7 @@ import ast
 import hashlib
 import json
 import re
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,6 +75,42 @@ class MshModel:
     elements: List[Tuple[int, int, List[int], List[int]]] = field(default_factory=list)
     # Stored as (element_id, element_type, node_ids, physical_tags) for 1D mesh entities.
     line_elements: List[Tuple[int, int, List[int], List[int]]] = field(default_factory=list)
+
+
+def parse_mdpa(path: Path) -> GeoModel:
+    """Adapt supported 2D MDPA geometry to named SVG surfaces and curves."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+    from kratos_visualization_tools.mdpa import _connection_paths, parse_mdpa_data
+
+    parsed = parse_mdpa_data(path)
+    if not parsed.nodes:
+        raise ValueError("No nodes parsed from MDPA file.")
+    if not parsed.entity_records:
+        raise ValueError("No elements or conditions parsed from MDPA file.")
+
+    model = GeoModel(points={nid: (x, y) for nid, (x, y, _z) in parsed.nodes.items()})
+    for block, entity_type, entity_id, node_ids in parsed.entity_records:
+        missing = sorted(set(node_ids) - model.points.keys())
+        if missing:
+            raise ValueError(f"{block} {entity_id} references missing nodes: {missing}")
+        try:
+            paths = _connection_paths(entity_type, node_ids)
+        except ValueError as error:
+            raise ValueError(f"{block} {entity_id}: {error}") from error
+        names = sorted(parsed.entity_submodels.get((block, entity_id), ())) or [entity_type]
+        for node_path in paths:
+            curve_id = len(model.splines) + 1
+            model.splines[curve_id] = list(node_path)
+            if len(node_path) >= 4 and node_path[0] == node_path[-1]:
+                surface_id = len(model.plane_surfaces) + 1
+                model.curve_loops[surface_id] = [curve_id]
+                model.plane_surfaces[surface_id] = [surface_id]
+                for name in names:
+                    model.physical_surfaces.setdefault(name, []).append(surface_id)
+            else:
+                for name in names:
+                    model.physical_curves.setdefault(name, []).append(curve_id)
+    return model
 
 
 def _strip_comments(text: str) -> str:
@@ -1393,8 +1432,8 @@ def msh_to_svg(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert Gmsh GEO/MSH file to styled SVG.")
-    parser.add_argument("--input", required=True, help="Path to .geo or .msh file")
+    parser = argparse.ArgumentParser(description="Convert GEO/MSH/MDPA file to styled SVG.")
+    parser.add_argument("--input", required=True, help="Path to .geo, .msh or .mdpa file")
     parser.add_argument("--output", required=True, help="Path to .svg output")
     parser.add_argument("--width", type=int, default=2200, help="SVG width in px")
     parser.add_argument("--height", type=int, default=1200, help="SVG height in px")
@@ -1419,8 +1458,8 @@ def main() -> None:
 
     suffix = in_path.suffix.lower()
 
-    if suffix == ".geo":
-        model = parse_geo(in_path)
+    if suffix in {".geo", ".mdpa"}:
+        model = parse_mdpa(in_path) if suffix == ".mdpa" else parse_geo(in_path)
         geo_to_svg(
             model,
             out_path,
@@ -1452,7 +1491,7 @@ def main() -> None:
         print(f"Wrote SVG: {out_path}")
         print(f"Parsed nodes={len(msh_model.nodes)}, elements={len(msh_model.elements)}")
     else:
-        raise ValueError("Unsupported input extension. Use .geo or .msh")
+        raise ValueError("Unsupported input extension. Use .geo, .msh or .mdpa")
 
 
 if __name__ == "__main__":

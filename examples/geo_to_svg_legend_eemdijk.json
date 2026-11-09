@@ -1,0 +1,108 @@
+{
+  "legend": {
+    "max_curves": 20,
+    "max_surfaces": 20,
+    "top_left": [920, 20],
+    "curves": [
+      {
+        "names": ["ground_left_boundary", "slaag_1_boundary", "slaag_2_boundary", "slaag_3_boundary", "slaag_4_boundary", "slaag_5_boundary", "slaag_6_boundary"], 
+        "label": "Left Boundary"
+      },
+      {
+        "name": "ground_right_boundary", 
+        "label": "Right Boundary"
+      },
+      {
+        "names": ["sheetpile_1_8", "sheetpile_9"], 
+        "label": "Sheetpile"
+      },
+      {
+        "name": "water_pressure_boundary",
+        "label": "Water Pressure Boundary"
+      },
+      {
+        "name": "water_loads",
+        "label": "Water Loads"
+      },
+      {
+        "names": ["kraan_load_p1", "kraan_load_p2"], 
+        "label": "Crane Load"
+      }
+    ],
+    "surfaces": [
+      {
+        "names": [
+          "soil_1_toplaag_left",
+          "soil_1_toplaag_right"
+        ],
+        "label": "Top Layer"
+      },
+      {
+        "names": [
+          "soil_2_klei_SS_left",
+          "soil_2_klei_SS_right"
+        ],
+        "label": "Klei Layer 1"
+      },
+      {
+        "names": [
+          "soil_3_veen_SS_left",
+          "soil_3_veen_SS_right"
+        ],
+        "label": "Veen Layer"
+      },
+      {
+        "names": [
+          "soil_4_diep_zand_left",
+          "soil_4_diep_zand_right"
+        ],
+        "label": "Deep Sand Layer 1"
+      },
+      {
+        "names": [
+          "soil_5_klei_SS_left",
+          "soil_5_klei_SS_right"
+        ],
+        "label": "Klei Layer 2"
+      },
+      {
+        "names": [
+          "soil_6_diep_zand_bottom",
+          "soil_6_diep_zand_left",
+          "soil_6_diep_zand_right"
+        ],
+        "label": "Deep Sand Layer 2"
+      },
+      {
+        "name": "ontgraven_bottom_layer",
+        "label": "Excavation Bottom Layer"
+      },
+      {
+        "name": "ontgraven_upper_layer",
+        "label": "Excavation Top layer"
+      },
+      {
+        "names": ["slaag_1_excavation_left","slaag_1_excavation_right"],
+        "label": "Replacable Top Layer "
+      },
+      {
+        "names": ["slaag_7_excavation_left1","slaag_8_excavation_left1"],
+        "label": "Temporary Embarkment"
+      },
+	  {
+        "names": ["slaag_1_aanbrengen_left", "slaag_1_aanbrengen_right", "slaag_2_aanbrengen_left", "slaag_2_aanbrengen_right", "slaag_3_aanbrengen_left", "slaag_3_aanbrengen_right", "slaag_4_aanbrengen_left", "slaag_4_aanbrengen_right", "slaag_5_aanbrengen_left", "slaag_5_aanbrengen_right", "slaag_6_aanbrengen_left", "slaag_6_aanbrengen_right", "slaag_7_aanbrengen_left2", "slaag_7_aanbrengen_right", "slaag_8_aanbrengen_left2", "slaag_8_aanbrengen_right", "slaag_9_aanbrengen_left", "slaag_9_aanbrengen_right"],
+        "label": "Embarkment "
+      }
+    ],
+    "symbols": {
+      "bottom_hatch_curves": ["Bottom"],
+      "left_fixity_curves": ["ground_left_boundary"],
+      "right_fixity_curves": ["ground_right_boundary"],
+      "load_arrow_curves": ["kraan_load_p1", "kraan_load_p2", "water_loads"]
+    },
+    "phreatic_line": {
+      "label": "Phreatic Line",
+      "points": [[0, -0.8], [60, -0.8]]
+    }
+  }
+}

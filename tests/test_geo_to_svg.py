@@ -577,7 +577,11 @@ def test_geo_to_svg_writes_geometry_and_configured_legend(tmp_path):
 
     root = ET.parse(output).getroot()
     assert root.attrib["viewBox"] == "0 0 400 300"
-    assert len(root.findall(f".//{SVG}g[@id='physical_surfaces']/{SVG}polygon")) == 2
+    surface_paths = root.findall(f".//{SVG}g[@id='physical_surfaces']/{SVG}path")
+    fills = [path for path in surface_paths if path.attrib["stroke"] == "none"]
+    assert len(fills) == 2
+    assert all(path.attrib["fill-rule"] == "evenodd" for path in fills)
+    assert not root.findall(f".//{SVG}g[@id='physical_surfaces']/{SVG}polygon")
     assert len(root.findall(f".//{SVG}g[@id='physical_curves']/{SVG}path")) == 1
     assert root.find(f".//{SVG}g[@id='legend']/{SVG}text").text == "Physical Curves (conditions)"
     assert any(node.text == "Model boundary" for node in root.findall(f".//{SVG}g[@id='legend']/{SVG}text"))
@@ -1067,8 +1071,10 @@ def test_mdpa_rendering_preserves_region_borders_legend_and_symbols(
 
     root = ET.parse(output).getroot()
     surfaces = root.find(f"{SVG}g[@id='physical_surfaces']")
-    assert len(surfaces.findall(f"{SVG}polygon")) == 4
-    borders = surfaces.findall(f"{SVG}path")
+    fills = [path for path in surfaces.findall(f"{SVG}path") if path.attrib["stroke"] == "none"]
+    assert len(fills) == 2
+    assert all(path.attrib["d"].count("Z") == 2 for path in fills)
+    borders = [path for path in surfaces.findall(f"{SVG}path") if path.attrib["fill"] == "none"]
     assert len(borders) == 1
     assert borders[0].attrib["d"].count("M") == 4
     assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1
@@ -1189,3 +1195,90 @@ def test_main_converts_mdpa_with_existing_legend_config(
     stdout = capsys.readouterr().out
     assert f"Wrote SVG: {output}" in stdout
     assert "Physical curves=1, physical surfaces=1" in stdout
+
+
+@pytest.mark.parametrize(
+    ("entries", "expected"),
+    [
+        ([], {"aggregate": [], "left": [1, 2], "right": [3]}),
+        (
+            [converter.LegendEntry(["aggregate"], "All", "all")],
+            {"aggregate": [1, 2, 3], "left": [], "right": []},
+        ),
+        (
+            [converter.LegendEntry(["missing", "right"], "R", "r")],
+            {"aggregate": [], "left": [1, 2], "right": [3]},
+        ),
+    ],
+)
+def test_unique_group_ids_prefers_configured_then_smallest_groups(entries, expected):
+    groups = {"aggregate": [1, 2, 3], "left": [1, 2], "right": [3, -3]}
+
+    assert converter._unique_group_ids(groups, entries) == expected
+
+
+def test_surface_regions_group_names_by_legend_style():
+    styles = {"A": "ab", "B": "ab", "C": "c", "D": "D"}
+
+    assert converter._surface_regions(["A", "B", "C", "D", "E"], styles) == [
+        ("ab", ["A", "B"]),
+        ("c", ["C"]),
+        ("D", ["D"]),
+        ("E", ["E"]),
+    ]
+
+
+def _two_square_model(**groups):
+    return converter.GeoModel(
+        points={1: (0, 0), 2: (1, 0), 3: (2, 0), 4: (2, 1), 5: (1, 1), 6: (0, 1)},
+        splines={1: [1, 2, 5, 6, 1], 2: [2, 3, 4, 5, 2]},
+        curve_loops={1: [1], 2: [2]},
+        plane_surfaces={1: [1], 2: [2]},
+        physical_surfaces=groups,
+    )
+
+
+def _surface_paths(output):
+    surfaces = ET.parse(output).getroot().find(f"{SVG}g[@id='physical_surfaces']")
+    paths = surfaces.findall(f"{SVG}path")
+    fills = [path for path in paths if path.attrib["stroke"] == "none"]
+    borders = [path for path in paths if path.attrib["fill"] == "none"]
+    return fills, borders
+
+
+@pytest.mark.parametrize(
+    ("surfaces_cfg", "fill_count", "border_segments"),
+    [
+        ([{"names": ["Left", "Right"], "label": "Stages"}], 2, [6]),
+        (None, 4, [4, 4]),
+    ],
+)
+def test_geo_to_svg_merges_grouped_regions_into_one_outline(
+    tmp_path, surfaces_cfg, fill_count, border_segments
+):
+    output = tmp_path / "merged.svg"
+
+    converter.geo_to_svg(
+        _two_square_model(Left=[1], Right=[2]), output, 400, 300, 20,
+        legend_cfg={"surfaces": surfaces_cfg},
+    )
+
+    fills, borders = _surface_paths(output)
+    assert len(fills) == fill_count
+    assert sorted(path.attrib["d"].count("M") for path in borders) == border_segments
+
+
+def test_geo_to_svg_draws_shared_surfaces_and_curves_once(tmp_path):
+    output = tmp_path / "dedup.svg"
+    model = _two_square_model(aggregate=[1, 2], Left=[1], Right=[2])
+    model.lines = {7: (1, 2)}
+    model.physical_curves = {"Bottom": [7], "all_curves": [7, -7]}
+
+    converter.geo_to_svg(model, output, 400, 300, 20)
+
+    fills, borders = _surface_paths(output)
+    assert len(fills) == 4
+    assert all(path.attrib["d"].count("Z") == 1 for path in fills)
+    assert len(borders) == 2
+    root = ET.parse(output).getroot()
+    assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1

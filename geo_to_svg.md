@@ -105,7 +105,12 @@ The MDPA reader converts the Kratos model into the same internal model as a GEO 
   Entities in no SubModelPart are grouped by their Kratos type name (e.g.
   `UPwSmallStrainElement2D3N`).
 - Edges shared by adjacent elements of the same group are hidden, so each
-  SubModelPart appears as one region.
+  SubModelPart appears as one region. Each region's fill is a single SVG path,
+  so no seams show between elements.
+- An element or condition that belongs to several SubModelParts (e.g. an
+  `interface_aggregate` group) is drawn only once. It goes to the first group
+  listed in the legend config; otherwise to the smallest group, so aggregate
+  groups lose to their more specific parts. This also applies to GEO input.
 
 Limitations:
 
@@ -174,7 +179,7 @@ The `--legend-config` JSON can have the settings at the root or nested under a
 
 | Key | Meaning |
 | --- | --- |
-| `curves` / `surfaces` | Legend entries, in display order. Each entry is a group name string or an object with `name` (one group) or `names` (several groups), an optional `label`, and an optional `show` (`false` hides the entry). Grouped names share one colour and one legend row. Groups that are not listed keep their own style and are not shown in the legend. Without this key, all groups are listed alphabetically. |
+| `curves` / `surfaces` | Legend entries, in display order. Each entry is a group name string or an object with `name` (one group) or `names` (several groups), an optional `label`, and an optional `show` (`false` hides the entry). Grouped names share one colour and one legend row; grouped surfaces are also drawn as one region with a single outer border (e.g. per-stage SubModelParts joined into one soil layer). Groups that are not listed keep their own style and border and are not shown in the legend. Without this key, all groups are listed alphabetically. |
 | `max_curves` / `max_surfaces` | Maximum number of legend rows per section (default 18). |
 | `top_left` | Legend position in SVG pixels, as `[x, y]` or `{"x": x, "y": y}` (default `[20, 20]`). |
 | `phreatic_line` | Dashed line through `points` given in model coordinates (at least 2 points), with its own legend row. |

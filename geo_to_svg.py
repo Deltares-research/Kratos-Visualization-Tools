@@ -21,6 +21,7 @@ Optional legend control JSON:
 Legend config schema (root object, or nested under "legend"):
     - "curves": [{"name": "group", "label": "Legend name", "show": true}, ...]
     - "surfaces": [{"name": "group"} or {"names": ["g1", "g2"], "label": "Combined"}, ...]
+      (grouped names are drawn as one region with one outline)
     - "max_curves": int, "max_surfaces": int
     - "top_left": [x, y] or {"x": x, "y": y} (legend top-left anchor in SVG pixels)
     - "phreatic_line": {"label": "...", "points": [[x1, y1], [x2, y2], ...]}
@@ -910,6 +911,47 @@ def _legend_entries(
     return entries, styles
 
 
+def _unique_group_ids(
+    groups: Dict[str, List[int]], entries: List[LegendEntry],
+) -> Dict[str, List[int]]:
+    """Assign each geometry id to one group so shared entities are drawn once.
+
+    Groups listed in the legend config win in config order; the remaining
+    groups follow from smallest to largest, so aggregate groups lose to
+    their more specific parts.
+    """
+    configured = [name for entry in entries for name in entry.names if name in groups]
+    configured_set = set(configured)
+    remaining = sorted(
+        (name for name in groups if name not in configured_set),
+        key=lambda name: (len(groups[name]), name),
+    )
+    owner: Dict[int, str] = {}
+    for name in dict.fromkeys(configured + remaining):
+        for gid in groups[name]:
+            owner.setdefault(abs(gid), name)
+
+    unique: Dict[str, List[int]] = {}
+    for name, ids in groups.items():
+        seen: set = set()
+        unique[name] = []
+        for gid in ids:
+            if owner[abs(gid)] == name and abs(gid) not in seen:
+                seen.add(abs(gid))
+                unique[name].append(gid)
+    return unique
+
+
+def _surface_regions(
+    names: List[str], style_by_name: Dict[str, str],
+) -> List[Tuple[str, List[str]]]:
+    """Group surface names by legend style; each style is drawn as one region."""
+    regions: Dict[str, List[str]] = {}
+    for name in names:
+        regions.setdefault(style_by_name.get(name, name), []).append(name)
+    return list(regions.items())
+
+
 def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) -> LegendSpec:
     curve_names = sorted(model.physical_curves.keys())
     surface_names = sorted(model.physical_surfaces.keys())
@@ -1051,54 +1093,46 @@ def geo_to_svg(
     curve_names = sorted(model.physical_curves.keys())
     legend_spec = _build_legend_spec(model, legend_cfg)
     center_svg = tr((0.5 * (xmin + xmax), 0.5 * (ymin + ymax)))
+    surface_ids = _unique_group_ids(model.physical_surfaces, legend_spec.surface_entries)
+    curve_ids = _unique_group_ids(model.physical_curves, legend_spec.curve_entries)
 
-    # Each Physical Surface from the .geo file gets its own outer boundary.
-    # Multiple plane surfaces within one Physical Surface share the same visual
-    # style and their internal shared edges are suppressed; only the outer
-    # boundary of the Physical Surface group is stroked.
-    # Different Physical Surfaces that happen to share the same legend color are
-    # still treated as separate regions (each gets its own border).
-    for name in surface_names:
-        style_key = legend_spec.surface_style_by_name.get(name, name)
+    # Each region is one Physical Surface, or all names grouped in one legend
+    # entry. A region's fill is a single path (no seams between polygons) and
+    # only its outer boundary is stroked; shared internal edges are suppressed.
+    regions = _surface_regions(surface_names, legend_spec.surface_style_by_name)
+    for style_key, region_names in regions:
         color = _hash_color(style_key)
         pat = _pick_pattern(style_key)
 
-        # Collect all plane-surface polygons for this one Physical Surface.
         all_polys: List[List[Tuple[float, float]]] = []
-        for sid in model.physical_surfaces[name]:
-            loop_ids = model.plane_surfaces.get(abs(sid), [])
-            if not loop_ids:
-                continue
-            for loop_id in loop_ids:
-                poly = _loop_to_polygon_points(model, abs(loop_id))
-                if len(poly) < 4:
-                    continue
-                all_polys.append(poly)
+        for name in region_names:
+            for sid in surface_ids[name]:
+                loop_ids = model.plane_surfaces.get(abs(sid), [])
+                for loop_id in loop_ids:
+                    poly = _loop_to_polygon_points(model, abs(loop_id))
+                    if len(poly) < 4:
+                        continue
+                    all_polys.append(poly)
 
         if not all_polys:
             continue
 
-        # Draw fills without stroke; the outer boundary is added separately below.
-        for poly in all_polys:
-            pts = [tr(p) for p in poly]
-            points_attr = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
-            ET.SubElement(g_surfaces, f"{{{SVG_NS}}}polygon", {
-                "points": points_attr,
-                "fill": color,
-                "fill-opacity": "0.25",
-                "stroke": "none",
-            })
-            ET.SubElement(g_surfaces, f"{{{SVG_NS}}}polygon", {
-                "points": points_attr,
-                "fill": f"url(#{pat})",
-                "fill-opacity": "0.45",
+        # evenodd keeps holes (inner loops of a plane surface) unfilled.
+        fill_d = " ".join(
+            "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in (tr(p) for p in poly)) + " Z"
+            for poly in all_polys
+        )
+        for fill, opacity in ((color, "0.25"), (f"url(#{pat})", "0.45")):
+            ET.SubElement(g_surfaces, f"{{{SVG_NS}}}path", {
+                "d": fill_d,
+                "fill": fill,
+                "fill-opacity": opacity,
+                "fill-rule": "evenodd",
                 "stroke": "none",
             })
 
-        # Find outer boundary: edges that appear in exactly one polygon of this
-        # Physical Surface.  Internal shared edges (between adjacent plane
-        # surfaces within the same Physical Surface) are counted twice and
-        # suppressed.
+        # Find the outer boundary: edges that appear in exactly one polygon of
+        # this region. Internal shared edges are counted twice and suppressed.
         edge_count: Dict[Tuple[Tuple[float, float], Tuple[float, float]], int] = {}
         edge_world: Dict[Tuple[Tuple[float, float], Tuple[float, float]], Tuple[Tuple[float, float], Tuple[float, float]]] = {}
         for poly in all_polys:
@@ -1135,7 +1169,7 @@ def geo_to_svg(
     for name in curve_names:
         style_key = legend_spec.curve_style_by_name.get(name, name)
         color = _hash_color(style_key)
-        for cid in model.physical_curves[name]:
+        for cid in curve_ids[name]:
             seg = _entity_polyline(model, cid)
             if len(seg) < 2:
                 continue

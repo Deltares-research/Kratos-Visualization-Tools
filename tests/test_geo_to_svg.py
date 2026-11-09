@@ -930,3 +930,65 @@ def test_main_rejects_unsupported_extension(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="Unsupported input extension"):
         converter.main()
+
+
+@pytest.mark.parametrize(
+    ("bounds", "point", "expected"),
+    [
+        ((-2, 8, -5, 5), (-2, -5), (10, 190)),
+        ((-2, 8, -5, 5), (8, 5), (290, 10)),
+        ((-2, 8, -5, 5), (3, 0), (150, 100)),
+        ((2, 2, 3, 3), (2, 3), (10, 190)),
+    ],
+)
+def test_svg_transform_preserves_padding_y_inversion_and_degenerate_bounds(
+    bounds, point, expected
+):
+    transform = converter._svg_transform(*bounds, width=300, height=200, padding=10)
+
+    assert transform(point) == pytest.approx(expected)
+
+
+def test_entity_polyline_prefers_line_when_spline_has_same_id(curve_model):
+    curve_model.splines[1] = [3, 4]
+
+    assert converter._entity_polyline(curve_model, 1) == [(0, 0), (2, 0)]
+
+
+@pytest.mark.parametrize("kind", ["curve", "surface"])
+def test_legend_entries_keep_group_indices_and_last_style_assignment(kind):
+    entries, styles = converter._legend_entries(
+        ["Clay", "Sand", "Other"],
+        [
+            None,
+            {"names": ["Clay", "Sand", "missing"], "label": "Ground"},
+            {"name": "Clay", "label": "Top"},
+        ],
+        kind,
+    )
+
+    assert entries == [
+        converter.LegendEntry(["Clay", "Sand"], "Ground", f"{kind}_cfg_1_Ground"),
+        converter.LegendEntry(["Clay"], "Top", f"{kind}_cfg_2_Top"),
+    ]
+    assert styles == {
+        "Clay": f"{kind}_cfg_2_Top",
+        "Sand": f"{kind}_cfg_1_Ground",
+        "Other": "Other",
+    }
+
+
+@pytest.mark.parametrize("config", [None, {}, {"top_left": [20, 20]}])
+def test_build_legend_spec_preserves_sorted_defaults(config):
+    model = converter.GeoModel(
+        physical_curves={"Z": [], "A": []},
+        physical_surfaces={"Sand": [], "Clay": []},
+    )
+
+    spec = converter._build_legend_spec(model, config)
+
+    assert [entry.label for entry in spec.curve_entries] == ["A", "Z"]
+    assert [entry.label for entry in spec.surface_entries] == ["Clay", "Sand"]
+    assert spec.curve_style_by_name == {"A": "A", "Z": "Z"}
+    assert spec.surface_style_by_name == {"Clay": "Clay", "Sand": "Sand"}
+    assert (spec.max_curve_items, spec.max_surface_items) == (18, 18)

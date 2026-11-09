@@ -7,6 +7,7 @@ Features:
 - If input is .msh, draws each mesh element with a distinct fill color.
 - Supports common GEO entities used in 2D profiles: Point, Line, Spline,
   Curve Loop / Line Loop, Plane Surface, Physical Curve/Line/Surface.
+- Standalone, standard-library implementation with shared GEO/MSH SVG helpers.
 
 Usage:
   python Eemdijk/tools/geo_to_svg.py --input Eemdijk/eemdijk.geo --output Eemdijk/Pictures/eemdijk_geo.svg
@@ -39,7 +40,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import math
 
 SVG_NS = "http://www.w3.org/2000/svg"
@@ -457,24 +458,9 @@ def parse_msh(path: Path) -> MshModel:
 
 def _entity_polyline(model: GeoModel, signed_id: int) -> List[Tuple[float, float]]:
     eid = abs(signed_id)
-    forward = signed_id > 0
-
-    if eid in model.lines:
-        n1, n2 = model.lines[eid]
-        pts = [model.points.get(n1), model.points.get(n2)]
-        pts = [p for p in pts if p is not None]
-        if not forward:
-            pts = list(reversed(pts))
-        return pts
-
-    if eid in model.splines:
-        nids = model.splines[eid]
-        pts = [model.points.get(n) for n in nids if model.points.get(n) is not None]
-        if not forward:
-            pts = list(reversed(pts))
-        return pts
-
-    return []
+    nids = model.lines[eid] if eid in model.lines else model.splines.get(eid, [])
+    pts = [model.points[n] for n in nids if n in model.points]
+    return pts if signed_id > 0 else list(reversed(pts))
 
 
 def _loop_to_polygon_points(model: GeoModel, loop_id: int) -> List[Tuple[float, float]]:
@@ -860,70 +846,43 @@ def _parse_legend_entry(raw: Any, kind: str) -> Optional[Tuple[List[str], str]]:
     if not label:
         label = names[0]
 
-    if kind == "curve" and len(names) > 1:
-        # Curves can also be grouped for one legend line if needed.
-        return names, label
-
     return names, label
+
+
+def _legend_entries(
+    names: List[str], raw_entries: Any, kind: str,
+) -> Tuple[List[LegendEntry], Dict[str, str]]:
+    styles = {name: name for name in names}
+    if not isinstance(raw_entries, list):
+        return [LegendEntry([name], name, name) for name in names], styles
+
+    entries: List[LegendEntry] = []
+    for idx, raw in enumerate(raw_entries):
+        parsed = _parse_legend_entry(raw, kind)
+        if not parsed:
+            continue
+        group_names, label = parsed
+        existing = [name for name in group_names if name in styles]
+        if not existing:
+            continue
+        style_key = f"{kind}_cfg_{idx}_{label}"
+        styles.update(dict.fromkeys(existing, style_key))
+        entries.append(LegendEntry(existing, label, style_key))
+    return entries, styles
 
 
 def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) -> LegendSpec:
     curve_names = sorted(model.physical_curves.keys())
     surface_names = sorted(model.physical_surfaces.keys())
-
-    curve_style_by_name = {name: name for name in curve_names}
-    surface_style_by_name = {name: name for name in surface_names}
-
-    if not legend_cfg:
-        return LegendSpec(
-            curve_entries=[LegendEntry([name], name, name) for name in curve_names],
-            surface_entries=[LegendEntry([name], name, name) for name in surface_names],
-            curve_style_by_name=curve_style_by_name,
-            surface_style_by_name=surface_style_by_name,
-            max_curve_items=18,
-            max_surface_items=18,
-        )
-
+    legend_cfg = legend_cfg or {}
     max_curve_items = int(legend_cfg.get("max_curves", 18))
     max_surface_items = int(legend_cfg.get("max_surfaces", 18))
-
-    curve_entries: List[LegendEntry] = []
-    surface_entries: List[LegendEntry] = []
-
-    raw_curve_entries = legend_cfg.get("curves")
-    if isinstance(raw_curve_entries, list):
-        for idx, raw in enumerate(raw_curve_entries):
-            parsed = _parse_legend_entry(raw, "curve")
-            if not parsed:
-                continue
-            names, label = parsed
-            existing = [n for n in names if n in model.physical_curves]
-            if not existing:
-                continue
-            style_key = f"curve_cfg_{idx}_{label}"
-            for n in existing:
-                curve_style_by_name[n] = style_key
-            curve_entries.append(LegendEntry(existing, label, style_key))
-    else:
-        curve_entries = [LegendEntry([name], name, name) for name in curve_names]
-
-    raw_surface_entries = legend_cfg.get("surfaces")
-    if isinstance(raw_surface_entries, list):
-        for idx, raw in enumerate(raw_surface_entries):
-            parsed = _parse_legend_entry(raw, "surface")
-            if not parsed:
-                continue
-            names, label = parsed
-            existing = [n for n in names if n in model.physical_surfaces]
-            if not existing:
-                continue
-            # All grouped surfaces share one style key so they appear as one category.
-            style_key = f"surface_cfg_{idx}_{label}"
-            for n in existing:
-                surface_style_by_name[n] = style_key
-            surface_entries.append(LegendEntry(existing, label, style_key))
-    else:
-        surface_entries = [LegendEntry([name], name, name) for name in surface_names]
+    curve_entries, curve_style_by_name = _legend_entries(
+        curve_names, legend_cfg.get("curves"), "curve"
+    )
+    surface_entries, surface_style_by_name = _legend_entries(
+        surface_names, legend_cfg.get("surfaces"), "surface"
+    )
 
     # Parse phreatic line config
     phreatic_line_label: Optional[str] = None
@@ -996,6 +955,33 @@ def _pattern_defs(svg: ET.Element) -> None:
     })
 
 
+def _svg_transform(
+    xmin: float, xmax: float, ymin: float, ymax: float,
+    width: int, height: int, padding: int,
+) -> Callable[[Tuple[float, float]], Tuple[float, float]]:
+    span_x = max(xmax - xmin, 1e-9)
+    span_y = max(ymax - ymin, 1e-9)
+
+    def tr(pt: Tuple[float, float]) -> Tuple[float, float]:
+        x, y = pt
+        sx = padding + (x - xmin) / span_x * (width - 2 * padding)
+        sy_data = padding + (y - ymin) / span_y * (height - 2 * padding)
+        return sx, height - sy_data
+
+    return tr
+
+
+def _new_svg(width: int, height: int) -> ET.Element:
+    svg = ET.Element(
+        f"{{{SVG_NS}}}svg",
+        {"width": str(width), "height": str(height), "viewBox": f"0 0 {width} {height}"},
+    )
+    ET.SubElement(svg, f"{{{SVG_NS}}}rect", {
+        "x": "0", "y": "0", "width": str(width), "height": str(height), "fill": "#ffffff"
+    })
+    return svg
+
+
 def geo_to_svg(
     model: GeoModel,
     out_path: Path,
@@ -1012,28 +998,8 @@ def geo_to_svg(
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
 
-    span_x = max(xmax - xmin, 1e-9)
-    span_y = max(ymax - ymin, 1e-9)
-
-    def tr(pt: Tuple[float, float]) -> Tuple[float, float]:
-        x, y = pt
-        sx = padding + (x - xmin) / span_x * (width - 2 * padding)
-        sy_data = padding + (y - ymin) / span_y * (height - 2 * padding)
-        sy = height - sy_data
-        return sx, sy
-
-    svg = ET.Element(
-        f"{{{SVG_NS}}}svg",
-        {
-            "width": str(width),
-            "height": str(height),
-            "viewBox": f"0 0 {width} {height}",
-        },
-    )
-
-    ET.SubElement(svg, f"{{{SVG_NS}}}rect", {
-        "x": "0", "y": "0", "width": str(width), "height": str(height), "fill": "#ffffff"
-    })
+    tr = _svg_transform(xmin, xmax, ymin, ymax, width, height, padding)
+    svg = _new_svg(width, height)
 
     _pattern_defs(svg)
 
@@ -1273,28 +1239,8 @@ def msh_to_svg(
     ys = [y for _, _, poly, _ in polygons for _, y in poly]
     xmin, xmax = min(xs), max(xs)
     ymin, ymax = min(ys), max(ys)
-    span_x = max(xmax - xmin, 1e-9)
-    span_y = max(ymax - ymin, 1e-9)
-
-    def tr(pt: Tuple[float, float]) -> Tuple[float, float]:
-        x, y = pt
-        sx = padding + (x - xmin) / span_x * (width - 2 * padding)
-        sy_data = padding + (y - ymin) / span_y * (height - 2 * padding)
-        sy = height - sy_data
-        return sx, sy
-
-    svg = ET.Element(
-        f"{{{SVG_NS}}}svg",
-        {
-            "width": str(width),
-            "height": str(height),
-            "viewBox": f"0 0 {width} {height}",
-        },
-    )
-
-    ET.SubElement(svg, f"{{{SVG_NS}}}rect", {
-        "x": "0", "y": "0", "width": str(width), "height": str(height), "fill": "#ffffff"
-    })
+    tr = _svg_transform(xmin, xmax, ymin, ymax, width, height, padding)
+    svg = _new_svg(width, height)
 
     edge_to_elements: Dict[Tuple[int, int], List[int]] = {}
     edge_coords: Dict[Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]] = {}
@@ -1313,17 +1259,10 @@ def msh_to_svg(
     )
     legend_spec = _build_legend_spec(fake_geo, legend_cfg)
 
-    def surface_name_from_tags(phys_tags: List[int]) -> Optional[str]:
+    def physical_name_from_tags(phys_tags: List[int], dimension: int) -> Optional[str]:
         for ptag in phys_tags:
             info = model.physical_names.get(ptag)
-            if info and info[0] == 2:
-                return info[1]
-        return None
-
-    def curve_name_from_tags(phys_tags: List[int]) -> Optional[str]:
-        for ptag in phys_tags:
-            info = model.physical_names.get(ptag)
-            if info and info[0] == 1:
+            if info and info[0] == dimension:
                 return info[1]
         return None
 
@@ -1338,7 +1277,7 @@ def msh_to_svg(
             continue
         n1, n2 = node_ids[0], node_ids[1]
         key = (n1, n2) if n1 < n2 else (n2, n1)
-        cname = curve_name_from_tags(phys_tags)
+        cname = physical_name_from_tags(phys_tags, 1)
         if not cname:
             continue
         style_key = legend_spec.curve_style_by_name.get(cname, cname)
@@ -1348,7 +1287,7 @@ def msh_to_svg(
             condition_color_by_edge[key] = ccolor
 
     for eid, corners, _poly, phys_tags in polygons:
-        sname = surface_name_from_tags(phys_tags)
+        sname = physical_name_from_tags(phys_tags, 2)
         if sname:
             style_key = legend_spec.surface_style_by_name.get(sname, sname)
         else:
@@ -1408,20 +1347,12 @@ def msh_to_svg(
         owner_styles = {elem_style_key[eid] for eid in owners if eid in elem_style_key}
         owner_colors = {elem_color[eid] for eid in owners if eid in elem_color}
 
-        if len(owner_styles) <= 1 and owner_colors:
+        if owner_colors and (len(owner_styles) <= 1 or not shared_edges_black):
             stroke = next(iter(owner_colors))
             width_val = boundary_edge_width
         else:
-            if not shared_edges_black:
-                if owner_colors:
-                    stroke = next(iter(owner_colors))
-                    width_val = boundary_edge_width
-                else:
-                    stroke = shared_edge_color
-                    width_val = shared_edge_width
-            else:
-                stroke = shared_edge_color
-                width_val = shared_edge_width
+            stroke = shared_edge_color
+            width_val = shared_edge_width
 
         p1, p2 = edge_coords[edge]
         x1, y1 = tr(p1)

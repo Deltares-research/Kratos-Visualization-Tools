@@ -148,23 +148,6 @@ def test_loop_polygon_returns_empty_for_unknown_loop(curve_model):
 
 
 @pytest.mark.parametrize(
-    ("curve_ids", "expected"),
-    [
-        ([], []),
-        ([99, 5, 6], []),
-        ([1, -2], [(0, 0), (2, 0), (2, 2)]),
-        ([1, 5, 99, -2], [(0, 0), (2, 0), (2, 2)]),
-        ([1, 3], [(0, 0), (2, 0), (2, 2), (0, 2)]),
-        ([-7, -1], [(2, 2), (2, 0), (0, 0), (2, 0), (0, 0)]),
-    ],
-)
-def test_collect_curve_points_handles_joins_and_incomplete_curves(
-    curve_model, curve_ids, expected
-):
-    assert converter._collect_curve_points(curve_model, curve_ids) == expected
-
-
-@pytest.mark.parametrize(
     ("names", "expected"),
     [
         ([], []),
@@ -179,6 +162,34 @@ def test_curve_points_by_name_keeps_valid_groups_in_requested_order(
     curve_model, names, expected
 ):
     assert converter._curve_points_by_name(curve_model, names) == expected
+
+
+def test_curve_points_by_name_chains_unordered_and_duplicate_edges():
+    model = converter.GeoModel(
+        points={i: (float(i), 0.0) for i in range(5)},
+        splines={1: [2, 3], 2: [0, 1], 3: [4, 3], 4: [1, 2], 5: [1, 0]},
+        physical_curves={"Bottom": [1, 2, 3, 4, 5]},
+    )
+
+    assert converter._curve_points_by_name(model, ["Bottom"]) == [
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0), (4.0, 0.0)],
+    ]
+
+
+def test_bottom_hatching_is_evenly_spaced_for_unordered_edges(tmp_path):
+    model = converter.GeoModel(
+        points={i: (float(i), 0.0) for i in range(11)} | {11: (0.0, 5.0)},
+        splines={i + 1: [n, n + 1] for i, n in enumerate([7, 2, 9, 0, 4, 1, 8, 3, 6, 5])},
+        physical_curves={"Bottom": list(range(1, 11))},
+    )
+    output = tmp_path / "hatch.svg"
+
+    converter.geo_to_svg(model, output, 520, 300, 10, legend_cfg={"rulers": False})
+
+    lines = ET.parse(output).getroot().findall(f"{SVG}g[@id='supports_and_loads']/{SVG}line")
+    xs = sorted(float(line.attrib["x1"]) for line in lines)
+    assert len(xs) == 22
+    assert all(b - a == pytest.approx(22.0) for a, b in zip(xs, xs[1:]))
 
 
 @pytest.mark.parametrize(
@@ -1044,14 +1055,14 @@ def test_parse_mdpa_maps_submodelpart_membership_and_quadratic_condition(mdpa_sv
 
     assert model.points[5] == (0.5, 0)
     assert model.physical_surfaces == {"Soil": [1, 2]}
-    assert set(model.physical_curves) == {"Bottom"}
+    assert set(model.physical_curves) == {"Bottom", "NodesOnly"}
     assert converter._curve_points_by_name(model, ["Bottom"]) == [
         [(0, 0), (0.5, 0), (1, 0)],
     ]
     assert converter._loop_to_polygon_points(model, 1) == [
         (0, 0), (1, 0), (0, 1), (0, 0),
     ]
-    assert "NodesOnly" not in model.physical_curves
+    assert converter._curve_points_by_name(model, ["NodesOnly"]) == [[(0, 0), (1, 0)]]
 
 
 def test_mdpa_rendering_preserves_region_borders_legend_and_symbols(
@@ -1079,7 +1090,7 @@ def test_mdpa_rendering_preserves_region_borders_legend_and_symbols(
     assert borders[0].attrib["d"].count("M") == 1
     assert borders[0].attrib["d"].count("L") == 3
     assert fills[0].attrib["d"] == borders[0].attrib["d"]
-    assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 1
+    assert len(root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")) == 2
     assert root.findall(f"{SVG}g[@id='supports_and_loads']/{SVG}line")
     assert root.find(f"{SVG}g[@id='supports_and_loads']/{SVG}path") is not None
     labels = [node.text for node in root.findall(f"{SVG}g[@id='legend']/{SVG}text")]
@@ -1196,7 +1207,8 @@ def test_main_converts_mdpa_with_existing_legend_config(
     assert any(node.text == "Ground" for node in root.iter())
     stdout = capsys.readouterr().out
     assert f"Wrote SVG: {output}" in stdout
-    assert "Physical curves=1, physical surfaces=1" in stdout
+    # Bottom (condition) plus NodesOnly (node-only SubModelPart on an outer edge).
+    assert "Physical curves=2, physical surfaces=1" in stdout
 
 
 @pytest.mark.parametrize(
@@ -1363,3 +1375,222 @@ def test_geo_to_svg_draws_coincident_interface_faces_once(tmp_path):
     assert len(paths) == 1
     assert paths[0].attrib["d"].count("M") == 1
     assert paths[0].attrib["d"].count("L") == 1
+
+
+def test_parse_mdpa_names_nested_parts_and_draws_node_only_groups_on_outer_edges(tmp_path):
+    source = tmp_path / "nested.mdpa"
+    source.write_text(
+        """Begin Nodes
+1 0 0 0
+2 1 0 0
+3 0 1 0
+4 1 1 0
+End Nodes
+Begin Elements Element2D3N
+1 0 1 2 3
+2 0 2 4 3
+End Elements
+Begin SubModelPart Soil // parent
+  Begin SubModelPartData
+  PRESSURE 1.0
+  End SubModelPartData
+  Begin SubModelPart Upper
+    Begin SubModelPartNodes
+    2
+    3
+    4
+    End SubModelPartNodes
+    Begin SubModelPartElements
+    2
+    End SubModelPartElements
+  End SubModelPart
+  Begin SubModelPartElements
+  1
+  End SubModelPartElements
+End SubModelPart
+Begin SubModelPart Diagonal
+  Begin SubModelPartNodes
+  2
+  3
+  End SubModelPartNodes
+End SubModelPart
+Begin SubModelPart Right
+  Begin SubModelPartNodes
+  2
+  4
+  End SubModelPartNodes
+End SubModelPart
+Begin SubModelPart AlsoRight
+  Begin SubModelPartNodes
+  2
+  4
+  End SubModelPartNodes
+End SubModelPart
+Begin SubModelPart Edges
+  Begin SubModelPart Top
+    Begin SubModelPartNodes
+    3
+    4
+    End SubModelPartNodes
+  End SubModelPart
+End SubModelPart
+""",
+        encoding="utf-8",
+    )
+
+    entity_groups, node_groups = converter._mdpa_memberships(source)
+    model = converter.parse_mdpa(source)
+
+    assert entity_groups == {("Elements", 2): {"Soil/Upper"}, ("Elements", 1): {"Soil"}}
+    assert node_groups["Edges/Top"] == {3, 4}
+    assert model.physical_surfaces == {"Soil": [1], "Soil/Upper": [2]}
+    assert set(model.physical_curves) == {"Right", "AlsoRight", "Edges/Top"}
+    assert model.physical_curves["Right"] == model.physical_curves["AlsoRight"]
+    assert converter._curve_points_by_name(model, ["Right"]) == [[(1, 0), (1, 1)]]
+    assert converter._curve_points_by_name(model, ["Edges/Top"]) == [[(1, 1), (0, 1)]]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ({"color": "#ABCdef"}, "#abcdef"),
+        ({"name": "A"}, None),
+        ("A", None),
+    ],
+)
+def test_configured_legend_color_returns_lowercase_hex_or_none(raw, expected):
+    assert converter._configured_legend_color(raw) == expected
+
+
+@pytest.mark.parametrize("color", ["red", "#12345", "#1234567", 123])
+def test_configured_legend_color_rejects_invalid_values(color):
+    with pytest.raises(ValueError, match="#RRGGBB"):
+        converter._configured_legend_color({"color": color})
+
+
+def test_build_legend_spec_accepts_conditions_and_elements_aliases():
+    model = converter.GeoModel(
+        physical_curves={"Head": [1], "Other": [2]},
+        physical_surfaces={"Clay": [1]},
+    )
+
+    spec = converter._build_legend_spec(model, {
+        "conditions": [{"name": "Head", "label": "Head = 5 m", "color": "#E34066"}],
+        "elements": [{"name": "Clay", "label": "Clay layer"}],
+    })
+
+    assert spec.curve_entries == [
+        converter.LegendEntry(["Head"], "Head = 5 m", "curve_cfg_0_Head = 5 m", "#e34066"),
+    ]
+    assert [entry.label for entry in spec.surface_entries] == ["Clay layer"]
+    assert spec.color("curve_cfg_0_Head = 5 m") == "#e34066"
+    assert spec.color("surface_cfg_0_Clay layer") == converter._hash_color("surface_cfg_0_Clay layer")
+    assert spec.color("Other") == converter._hash_color("Other")
+
+
+def test_build_legend_spec_prefers_curves_and_surfaces_over_aliases():
+    model = converter.GeoModel(physical_curves={"A": [1]}, physical_surfaces={"S": [1]})
+
+    spec = converter._build_legend_spec(model, {
+        "curves": [{"name": "A", "label": "primary"}],
+        "conditions": [{"name": "A", "label": "alias"}],
+        "surfaces": [{"name": "S", "label": "primary"}],
+        "elements": [{"name": "S", "label": "alias"}],
+    })
+
+    assert [entry.label for entry in spec.curve_entries] == ["primary"]
+    assert [entry.label for entry in spec.surface_entries] == ["primary"]
+
+
+def _square_model():
+    return converter.GeoModel(
+        points={1: (0, 0), 2: (10, 0), 3: (10, 5), 4: (0, 5)},
+        lines={1: (1, 2), 2: (2, 3), 3: (3, 4), 4: (4, 1)},
+        curve_loops={1: [1, 2, 3, 4]},
+        plane_surfaces={1: [1]},
+        physical_surfaces={"Clay": [1]},
+        physical_curves={"Top": [3]},
+    )
+
+
+def test_geo_to_svg_uses_configured_colors_in_drawing_and_legend(tmp_path):
+    output = tmp_path / "colors.svg"
+
+    converter.geo_to_svg(_square_model(), output, 400, 300, 20, legend_cfg={
+        "elements": [{"name": "Clay", "color": "#ABCDEF"}],
+        "conditions": [{"name": "Top", "color": "#123456"}],
+    })
+
+    root = ET.parse(output).getroot()
+    surface_paths = root.findall(f"{SVG}g[@id='physical_surfaces']/{SVG}path")
+    assert any(path.attrib["fill"] == "#abcdef" for path in surface_paths)
+    assert any(path.attrib["stroke"] == "#abcdef" for path in surface_paths)
+    curve_paths = root.findall(f"{SVG}g[@id='physical_curves']/{SVG}path")
+    assert [path.attrib["stroke"] for path in curve_paths] == ["#123456"]
+    legend = root.find(f"{SVG}g[@id='legend']")
+    assert legend.find(f"{SVG}line").attrib["stroke"] == "#123456"
+    assert legend.find(f"{SVG}rect").attrib["stroke"] == "#abcdef"
+
+
+@pytest.mark.parametrize(
+    ("span", "target_count", "expected"),
+    [(10, 5, 2), (100, 3, 50), (1, 4, 0.5), (7, 1, 10), (0, 3, 5e-13)],
+)
+def test_nice_tick_step_rounds_to_one_two_five_steps(span, target_count, expected):
+    assert converter._nice_tick_step(span, target_count) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("value", "step", "expected"),
+    [(10, 5, "10"), (0.5, 0.5, "0.5"), (2.5, 0.25, "2.50"), (-1e-17, 0.25, "0.00")],
+)
+def test_format_tick_value_uses_step_precision(value, step, expected):
+    assert converter._format_tick_value(value, step) == expected
+
+
+def test_geo_to_svg_draws_rulers_and_axis_triad_by_default(tmp_path):
+    output = tmp_path / "rulers.svg"
+
+    converter.geo_to_svg(_square_model(), output, 400, 300, 20)
+
+    root = ET.parse(output).getroot()
+    rulers = root.find(f"{SVG}g[@id='coordinate_rulers']")
+    assert [node.text for node in rulers.findall(f"{SVG}text")] == ["0", "5", "10", "0", "5"]
+    assert len(rulers.findall(f"{SVG}line")) == 5
+    assert rulers.find(f"{SVG}path").attrib["d"] == "M20.0,20.0V280.0H380.0"
+    triad = root.find(f"{SVG}g[@id='axes_triad']")
+    assert [node.text for node in triad.findall(f"{SVG}text")] == ["X", "Y"]
+    assert len(triad.findall(f"{SVG}polygon")) == 2
+
+
+def test_geo_to_svg_hides_rulers_when_disabled(tmp_path):
+    output = tmp_path / "no_rulers.svg"
+
+    converter.geo_to_svg(_square_model(), output, 400, 300, 20, legend_cfg={"rulers": False})
+
+    root = ET.parse(output).getroot()
+    assert root.find(f"{SVG}g[@id='coordinate_rulers']") is None
+    assert root.find(f"{SVG}g[@id='axes_triad']") is None
+
+
+@pytest.mark.parametrize("rulers", [True, False])
+def test_msh_to_svg_uses_configured_colors_and_optional_rulers(tmp_path, rulers):
+    model = converter.MshModel(
+        nodes={1: (0, 0, 0), 2: (1, 0, 0), 3: (0, 1, 0)},
+        physical_names={1: (2, "Soil"), 2: (1, "Base")},
+        elements=[(1, 2, [1, 2, 3], [1])],
+        line_elements=[(2, 1, [1, 2], [2])],
+    )
+    output = tmp_path / "mesh_colors.svg"
+
+    converter.msh_to_svg(model, output, 400, 300, 20, legend_cfg={
+        "elements": [{"name": "Soil", "color": "#00FF00"}],
+        "conditions": [{"name": "Base", "color": "#0000FF"}],
+        "rulers": rulers,
+    })
+
+    root = ET.parse(output).getroot()
+    strokes = {path.attrib["stroke"] for path in root.findall(f"{SVG}g[@id='mesh_elements']/{SVG}path")}
+    assert strokes == {"#00ff00", "#0000ff"}
+    assert (root.find(f"{SVG}g[@id='coordinate_rulers']") is not None) is rulers
+    assert (root.find(f"{SVG}g[@id='axes_triad']") is not None) is rulers

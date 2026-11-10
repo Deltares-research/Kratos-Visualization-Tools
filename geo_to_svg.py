@@ -7,7 +7,10 @@ Features:
 - If input is .msh, draws each mesh element with a distinct fill color.
 - Supports common GEO entities used in 2D profiles: Point, Line, Spline,
   Curve Loop / Line Loop, Plane Surface, Physical Curve/Line/Surface.
-- MDPA input reuses the package parser and draws SubModelParts as regions/curves.
+- MDPA input reuses the package parser and draws SubModelParts as regions/curves;
+  nested SubModelParts are named "Parent/Child", and node-only SubModelParts
+  are drawn along the outer element edges whose end nodes they contain.
+- Draws model-coordinate rulers and an X/Y axis triad.
 - GEO/MSH input requires only the standard library.
 
 Usage:
@@ -19,10 +22,12 @@ Optional legend control JSON:
     python Eemdijk/tools/geo_to_svg.py --input Eemdijk/eemdijk.geo --output out.svg --legend-config cfg.json
 
 Legend config schema (root object, or nested under "legend"):
-    - "curves": [{"name": "group", "label": "Legend name", "show": true}, ...]
-    - "surfaces": [{"name": "group"} or {"names": ["g1", "g2"], "label": "Combined"}, ...]
-      (grouped names are drawn as one region with one outline)
+    - "curves" (alias "conditions"): [{"name": "group", "label": "Legend name", "show": true,
+      "color": "#RRGGBB"}, ...]
+    - "surfaces" (alias "elements"): [{"name": "group"} or {"names": ["g1", "g2"], "label": "Combined"}, ...]
+      (grouped names are drawn as one region with one outline; "color" is optional)
     - "max_curves": int, "max_surfaces": int
+    - "rulers": false (hide coordinate rulers and the axis triad)
     - "top_left": [x, y] or {"x": x, "y": y} (legend top-left anchor in SVG pixels)
     - "phreatic_line": {"label": "...", "points": [[x1, y1], [x2, y2], ...]}
     - "symbols": {
@@ -78,8 +83,61 @@ class MshModel:
     line_elements: List[Tuple[int, int, List[int], List[int]]] = field(default_factory=list)
 
 
+def _mdpa_memberships(
+    path: Path,
+) -> Tuple[Dict[Tuple[str, int], set], Dict[str, set]]:
+    """Return SubModelPart entity and node memberships keyed by nested name.
+
+    Nested SubModelParts are named ``Parent/Child``; an entity or node belongs
+    to the SubModelPart that lists it.
+    """
+    entity_groups: Dict[Tuple[str, int], set] = {}
+    node_groups: Dict[str, set] = {}
+    stack: List[str] = []
+    listing: Optional[str] = None
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.split("//", 1)[0].strip()
+            if not line:
+                continue
+            words = line.split()
+            keyword = " ".join(words[:2]).lower()
+            if keyword == "begin submodelpart" and len(words) >= 3:
+                stack.append(" ".join(words[2:]))
+                listing = None
+            elif keyword == "end submodelpart":
+                if stack:
+                    stack.pop()
+                listing = None
+            elif stack and keyword in {
+                "begin submodelpartnodes",
+                "begin submodelpartelements",
+                "begin submodelpartconditions",
+            }:
+                listing = words[1][len("SubModelPart"):].capitalize()
+                if listing == "Nodes":
+                    node_groups.setdefault("/".join(stack), set())
+            elif words[0].lower() == "end":
+                listing = None
+            elif listing and stack:
+                try:
+                    item_id = int(words[0])
+                except ValueError:
+                    continue
+                name = "/".join(stack)
+                if listing == "Nodes":
+                    node_groups[name].add(item_id)
+                else:
+                    entity_groups.setdefault((listing, item_id), set()).add(name)
+    return entity_groups, node_groups
+
+
 def parse_mdpa(path: Path) -> GeoModel:
-    """Adapt supported 2D MDPA geometry to named SVG surfaces and curves."""
+    """Adapt supported 2D MDPA geometry to named SVG surfaces and curves.
+
+    Node-only SubModelParts become curves along the outer element edges whose
+    two end nodes both belong to the group.
+    """
     sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
     from kratos_visualization_tools.mdpa import _connection_paths, parse_mdpa_data
 
@@ -88,8 +146,10 @@ def parse_mdpa(path: Path) -> GeoModel:
         raise ValueError("No nodes parsed from MDPA file.")
     if not parsed.entity_records:
         raise ValueError("No elements or conditions parsed from MDPA file.")
+    entity_groups, node_groups = _mdpa_memberships(path)
 
     model = GeoModel(points={nid: (x, y) for nid, (x, y, _z) in parsed.nodes.items()})
+    surface_edges: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
     for block, entity_type, entity_id, node_ids in parsed.entity_records:
         missing = sorted(set(node_ids) - model.points.keys())
         if missing:
@@ -98,7 +158,7 @@ def parse_mdpa(path: Path) -> GeoModel:
             paths = _connection_paths(entity_type, node_ids)
         except ValueError as error:
             raise ValueError(f"{block} {entity_id}: {error}") from error
-        names = sorted(parsed.entity_submodels.get((block, entity_id), ())) or [entity_type]
+        names = sorted(entity_groups.get((block, entity_id), ())) or [entity_type]
         for node_path in paths:
             curve_id = len(model.splines) + 1
             model.splines[curve_id] = list(node_path)
@@ -108,9 +168,24 @@ def parse_mdpa(path: Path) -> GeoModel:
                 model.plane_surfaces[surface_id] = [surface_id]
                 for name in names:
                     model.physical_surfaces.setdefault(name, []).append(surface_id)
+                for edge in zip(node_path, node_path[1:]):
+                    surface_edges.setdefault(tuple(sorted(edge)), []).append(edge)
             else:
                 for name in names:
                     model.physical_curves.setdefault(name, []).append(curve_id)
+
+    entity_names = {name for names in entity_groups.values() for name in names}
+    outer_edges = [edges[0] for edges in surface_edges.values() if len(edges) == 1]
+    edge_curve_ids: Dict[Tuple[int, int], int] = {}
+    for name in sorted(set(node_groups) - entity_names):
+        nodes = node_groups[name]
+        for edge in outer_edges:
+            if edge[0] not in nodes or edge[1] not in nodes:
+                continue
+            if edge not in edge_curve_ids:
+                edge_curve_ids[edge] = len(model.splines) + 1
+                model.splines[edge_curve_ids[edge]] = list(edge)
+            model.physical_curves.setdefault(name, []).append(edge_curve_ids[edge])
     return model
 
 
@@ -545,28 +620,23 @@ def _pick_pattern(name: str) -> str:
     return patterns[idx]
 
 
-def _collect_curve_points(model: GeoModel, curve_ids: List[int]) -> List[Tuple[float, float]]:
-    pts: List[Tuple[float, float]] = []
-    for cid in curve_ids:
-        seg = _entity_polyline(model, cid)
-        if len(seg) < 2:
-            continue
-        if pts and pts[-1] == seg[0]:
-            pts.extend(seg[1:])
-        else:
-            pts.extend(seg)
-    return pts
-
-
 def _curve_points_by_name(model: GeoModel, names: List[str]) -> List[List[Tuple[float, float]]]:
+    """Return each group's curves as ordered polylines for symbol placement.
+
+    Segments are deduplicated and chained, so groups stored as unordered
+    pieces (e.g. MDPA conditions or node-only edges) give continuous runs
+    and symbols are spaced evenly along them.
+    """
     out: List[List[Tuple[float, float]]] = []
     for name in names:
-        ids = model.physical_curves.get(name, [])
-        if not ids:
-            continue
-        pts = _collect_curve_points(model, ids)
-        if len(pts) >= 2:
-            out.append(pts)
+        segments: Dict[Tuple[Point, Point], Segment] = {}
+        for cid in model.physical_curves.get(name, []):
+            pts = _entity_polyline(model, cid)
+            for p1, p2 in zip(pts, pts[1:]):
+                key = _segment_key((p1, p2))
+                if key[0] != key[1]:
+                    segments.setdefault(key, (p1, p2))
+        out.extend(_chain_segments(list(segments.values())))
     return out
 
 
@@ -842,6 +912,7 @@ class LegendEntry:
     names: List[str]
     label: str
     style_key: str
+    color: Optional[str] = None
 
 
 @dataclass
@@ -855,6 +926,14 @@ class LegendSpec:
     phreatic_line_label: Optional[str] = None
     phreatic_line_points: Optional[List[Tuple[float, float]]] = None
     legend_top_left: Tuple[float, float] = (20.0, 20.0)
+    show_rulers: bool = True
+
+    def color(self, style_key: str) -> str:
+        """Return the configured entry color for a style, else a hashed one."""
+        for entry in self.curve_entries + self.surface_entries:
+            if entry.style_key == style_key and entry.color:
+                return entry.color
+        return _hash_color(style_key)
 
 
 def _parse_legend_entry(raw: Any, kind: str) -> Optional[Tuple[List[str], str]]:
@@ -889,6 +968,16 @@ def _parse_legend_entry(raw: Any, kind: str) -> Optional[Tuple[List[str], str]]:
     return names, label
 
 
+def _configured_legend_color(raw: Any) -> Optional[str]:
+    """Return a legend entry's optional ``#RRGGBB`` color in lower case."""
+    if not isinstance(raw, dict) or "color" not in raw:
+        return None
+    color = raw["color"]
+    if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        raise ValueError(f"Invalid legend color {color!r}; expected a #RRGGBB hex color")
+    return color.lower()
+
+
 def _legend_entries(
     names: List[str], raw_entries: Any, kind: str,
 ) -> Tuple[List[LegendEntry], Dict[str, str]]:
@@ -907,7 +996,7 @@ def _legend_entries(
             continue
         style_key = f"{kind}_cfg_{idx}_{label}"
         styles.update(dict.fromkeys(existing, style_key))
-        entries.append(LegendEntry(existing, label, style_key))
+        entries.append(LegendEntry(existing, label, style_key, _configured_legend_color(raw)))
     return entries, styles
 
 
@@ -958,11 +1047,12 @@ def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) ->
     legend_cfg = legend_cfg or {}
     max_curve_items = int(legend_cfg.get("max_curves", 18))
     max_surface_items = int(legend_cfg.get("max_surfaces", 18))
+    # "conditions" and "elements" are accepted as aliases of the GEO terms.
     curve_entries, curve_style_by_name = _legend_entries(
-        curve_names, legend_cfg.get("curves"), "curve"
+        curve_names, legend_cfg.get("curves", legend_cfg.get("conditions")), "curve"
     )
     surface_entries, surface_style_by_name = _legend_entries(
-        surface_names, legend_cfg.get("surfaces"), "surface"
+        surface_names, legend_cfg.get("surfaces", legend_cfg.get("elements")), "surface"
     )
 
     # Parse phreatic line config
@@ -1008,6 +1098,7 @@ def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) ->
         phreatic_line_label=phreatic_line_label,
         phreatic_line_points=phreatic_line_points,
         legend_top_left=legend_top_left,
+        show_rulers=legend_cfg.get("rulers", True) is not False,
     )
 
 
@@ -1164,6 +1255,92 @@ def _new_svg(width: int, height: int) -> ET.Element:
     return svg
 
 
+def _nice_tick_step(span: float, target_count: int) -> float:
+    """Return a 1/2/5 x 10^n tick step giving about ``target_count`` ticks."""
+    raw_step = max(span, 1e-12) / max(target_count, 1)
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    fraction = raw_step / magnitude
+    multiplier = 1 if fraction <= 1 else 2 if fraction <= 2 else 5 if fraction <= 5 else 10
+    return multiplier * magnitude
+
+
+def _format_tick_value(value: float, step: float) -> str:
+    """Format a tick value with just enough decimals to resolve ``step``."""
+    precision = 0
+    while precision < 12 and abs(round(step, precision) - step) > abs(step) * 1e-10:
+        precision += 1
+    rounded = round(value, precision)
+    return f"{rounded + 0.0:.{precision}f}"
+
+
+def _draw_rulers_and_triad(
+    svg: ET.Element,
+    width: int,
+    height: int,
+    padding: int,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    tr: Callable[[Tuple[float, float]], Tuple[float, float]],
+) -> None:
+    """Draw model-coordinate rulers along the left/bottom edges and an X/Y triad."""
+    left, right = float(padding), float(width - padding)
+    top, bottom = float(padding), float(height - padding)
+    ruler_color = "#555"
+    text_style = {"font-size": "24", "font-family": "DejaVu Sans", "fill": "#333"}
+    rulers = ET.SubElement(svg, f"{{{SVG_NS}}}g", {"id": "coordinate_rulers"})
+    ET.SubElement(rulers, f"{{{SVG_NS}}}path", {
+        "d": f"M{left:.1f},{top:.1f}V{bottom:.1f}H{right:.1f}",
+        "fill": "none", "stroke": ruler_color, "stroke-width": "2",
+    })
+
+    def ticks(lo: float, hi: float, pixels: float) -> List[Tuple[float, str]]:
+        step = _nice_tick_step(hi - lo, max(2, int(pixels / 100)))
+        first = math.ceil(lo / step - 1e-10)
+        last = math.floor(hi / step + 1e-10)
+        return [(i * step, _format_tick_value(i * step, step)) for i in range(first, last + 1)]
+
+    for value, text in ticks(xmin, xmax, right - left):
+        x = tr((value, ymin))[0]
+        ET.SubElement(rulers, f"{{{SVG_NS}}}line", {
+            "x1": f"{x:.2f}", "y1": f"{bottom:.2f}", "x2": f"{x:.2f}", "y2": f"{bottom - 8:.2f}",
+            "stroke": ruler_color, "stroke-width": "1",
+        })
+        ET.SubElement(rulers, f"{{{SVG_NS}}}text", {
+            "x": f"{x:.2f}", "y": f"{bottom + 24:.2f}", "text-anchor": "middle", **text_style,
+        }).text = text
+
+    for value, text in ticks(ymin, ymax, bottom - top):
+        y = tr((xmin, value))[1]
+        ET.SubElement(rulers, f"{{{SVG_NS}}}line", {
+            "x1": f"{left:.2f}", "y1": f"{y:.2f}", "x2": f"{left + 8:.2f}", "y2": f"{y:.2f}",
+            "stroke": ruler_color, "stroke-width": "1",
+        })
+        ET.SubElement(rulers, f"{{{SVG_NS}}}text", {
+            "x": f"{left - 8:.2f}", "y": f"{y + 8:.2f}", "text-anchor": "end", **text_style,
+        }).text = text
+
+    triad = ET.SubElement(svg, f"{{{SVG_NS}}}g", {"id": "axes_triad"})
+    ox, oy, length = 24.0, float(height) - 24.0, 36.0
+    for axis, ex, ey, color, head, label_xy in (
+        ("X", ox + length, oy, "#c62828", ((-8, -4), (-8, 4)), (4, 5)),
+        ("Y", ox, oy - length, "#2e7d32", ((-4, 8), (4, 8)), (0, -5)),
+    ):
+        ET.SubElement(triad, f"{{{SVG_NS}}}line", {
+            "x1": f"{ox:.1f}", "y1": f"{oy:.1f}", "x2": f"{ex:.1f}", "y2": f"{ey:.1f}",
+            "stroke": color, "stroke-width": "2.5",
+        })
+        points = [(ex, ey)] + [(ex + dx, ey + dy) for dx, dy in head]
+        ET.SubElement(triad, f"{{{SVG_NS}}}polygon", {
+            "points": " ".join(f"{x:.1f},{y:.1f}" for x, y in points), "fill": color,
+        })
+        ET.SubElement(triad, f"{{{SVG_NS}}}text", {
+            "x": f"{ex + label_xy[0]:.1f}", "y": f"{ey + label_xy[1]:.1f}",
+            "font-size": "13", "font-family": "DejaVu Sans", "font-weight": "bold", "fill": color,
+        }).text = axis
+
+
 def geo_to_svg(
     model: GeoModel,
     out_path: Path,
@@ -1202,7 +1379,7 @@ def geo_to_svg(
     # only its outer boundary is stroked; shared internal edges are suppressed.
     regions = _surface_regions(surface_names, legend_spec.surface_style_by_name)
     for style_key, region_names in regions:
-        color = _hash_color(style_key)
+        color = legend_spec.color(style_key)
         pat = _pick_pattern(style_key)
 
         all_polys: List[List[Tuple[float, float]]] = []
@@ -1274,7 +1451,7 @@ def geo_to_svg(
         ET.SubElement(g_curves, f"{{{SVG_NS}}}path", {
             "d": path_d,
             "fill": "none",
-            "stroke": _hash_color(style_key),
+            "stroke": legend_spec.color(style_key),
             "stroke-width": "2.5",
             "stroke-linecap": "round",
             "stroke-linejoin": "round",
@@ -1311,6 +1488,9 @@ def geo_to_svg(
         phreatic_points_svg = [tr(p) for p in legend_spec.phreatic_line_points]
         _draw_phreatic_line(g_symbols, phreatic_points_svg)
 
+    if legend_spec.show_rulers:
+        _draw_rulers_and_triad(svg, width, height, padding, xmin, xmax, ymin, ymax, tr)
+
     # Place legend using explicit top-left coordinates from config.
     lx = float(legend_spec.legend_top_left[0])
     ly = float(legend_spec.legend_top_left[1])
@@ -1323,7 +1503,7 @@ def geo_to_svg(
     y = ly + 18
     curve_legend = legend_spec.curve_entries[: max(0, legend_spec.max_curve_items)]
     for entry in curve_legend:
-        color = _hash_color(entry.style_key)
+        color = legend_spec.color(entry.style_key)
         ET.SubElement(g_legend, f"{{{SVG_NS}}}line", {
             "x1": str(lx), "y1": str(y), "x2": str(lx + 18), "y2": str(y),
             "stroke": color, "stroke-width": "3"
@@ -1351,7 +1531,7 @@ def geo_to_svg(
     y2 = ly + 18
     surface_legend = legend_spec.surface_entries[: max(0, legend_spec.max_surface_items)]
     for entry in surface_legend:
-        color = _hash_color(entry.style_key)
+        color = legend_spec.color(entry.style_key)
         pat = _pick_pattern(entry.style_key)
         ET.SubElement(g_legend, f"{{{SVG_NS}}}rect", {
             "x": str(lx2), "y": str(y2 - 10), "width": "16", "height": "12",
@@ -1451,7 +1631,7 @@ def msh_to_svg(
         if not cname:
             continue
         style_key = legend_spec.curve_style_by_name.get(cname, cname)
-        ccolor = _hash_color(style_key)
+        ccolor = legend_spec.color(style_key)
         # Keep first assignment for deterministic output when duplicates exist.
         if key not in condition_color_by_edge:
             condition_color_by_edge[key] = ccolor
@@ -1463,7 +1643,7 @@ def msh_to_svg(
         else:
             style_key = f"elem_{eid}"
         elem_style_key[eid] = style_key
-        elem_color[eid] = _hash_color(style_key)
+        elem_color[eid] = legend_spec.color(style_key)
 
         local_edges: List[Tuple[int, int]] = []
         for i in range(len(corners)):
@@ -1538,6 +1718,9 @@ def msh_to_svg(
             "fill": "none",
             "stroke-linecap": "round",
         })
+
+    if legend_spec.show_rulers:
+        _draw_rulers_and_triad(svg, width, height, padding, xmin, xmax, ymin, ymax, tr)
 
     lx = 20
     ly = 24

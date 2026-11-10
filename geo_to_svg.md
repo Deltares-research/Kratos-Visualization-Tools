@@ -20,7 +20,7 @@ cross-section for a report or presentation. It accepts three kinds of input:
 | --- | --- | --- |
 | `.geo` | Gmsh geometry script | Physical surfaces as patterned regions; physical curves as coloured lines |
 | `.msh` | Gmsh mesh (format v2 or v4) | Each 2D mesh element, coloured by physical group; shared edges outlined |
-| `.mdpa` | Kratos model part | SubModelPart elements as patterned regions; open element/condition paths as curves |
+| `.mdpa` | Kratos model part | SubModelPart elements as patterned regions; open element/condition paths and node-only SubModelParts as curves |
 
 GEO and MDPA input produce the same kind of picture. You can add support and load
 symbols, a phreatic line and a legend that you control from a JSON file.
@@ -102,8 +102,13 @@ The MDPA reader converts the Kratos model into the same internal model as a GEO 
     filled region.
   - An **open** path becomes a curve.
 - Group names come from the SubModelParts that list the element or condition.
-  Entities in no SubModelPart are grouped by their Kratos type name (e.g.
-  `UPwSmallStrainElement2D3N`).
+  Nested SubModelParts are named `Parent/Child`; an entity belongs to the
+  SubModelPart block that lists it. Entities in no SubModelPart are grouped by
+  their Kratos type name (e.g. `UPwSmallStrainElement2D3N`).
+- **Node-only SubModelParts** (nodes but no elements or conditions) become curves
+  along the outer element edges whose two end nodes are both in the group, so
+  boundary groups such as `Bottom` or `Left_Edge` are coloured and can carry the
+  hatching, fixity and load symbols. Edges inside the mesh are not used.
 - Edges shared by adjacent elements of the same group are hidden, so each
   SubModelPart appears as one region. Only each region's outer outline (and
   holes) is written, with points on straight runs (e.g. mid-side nodes) dropped,
@@ -117,9 +122,8 @@ The MDPA reader converts the Kratos model into the same internal model as a GEO 
 
 Limitations:
 
-- **Node-only SubModelParts** (those with nodes but no elements or conditions)
-  do not define anything to draw. They cannot be used for the hatching, fixity or
-  load symbols.
+- A node-only SubModelPart whose nodes do not cover an outer element edge (e.g. a
+  single node or an internal line of nodes) is not drawn.
 - An element or condition that references a missing node is reported as an error,
   for example `Elements 12 references missing nodes: [99]`.
 - An unsupported geometry is reported as an error, for example
@@ -135,11 +139,13 @@ Limitations:
 | `supports_and_loads` | GEO/MDPA | Bottom hatching, side fixities, load arrows, phreatic line |
 | `mesh_elements` | MSH | One filled polygon per element |
 | `mesh_shared_edges` | MSH | Element edge outlines |
+| `coordinate_rulers` | all | Left and bottom rulers with ticks in model coordinates |
+| `axes_triad` | all | X/Y axis arrows in the bottom-left corner |
 | `legend` | all | Legend box |
 
 Colours come from a stable hash of the group name, so the same name always gets the
-same colour. Surfaces also get hatch or dot patterns, which keep regions
-distinguishable in greyscale prints.
+same colour, unless a legend entry sets its own `color`. Surfaces also get hatch or
+dot patterns, which keep regions distinguishable in greyscale prints.
 
 ## Legend configuration
 
@@ -153,7 +159,7 @@ The `--legend-config` JSON can have the settings at the root or nested under a
     "max_curves": 18,
     "max_surfaces": 18,
     "curves": [
-      {"name": "kraan_load_p1", "label": "Crane load"},
+      {"name": "kraan_load_p1", "label": "Crane load", "color": "#E34066"},
       {"name": "Interface", "show": false}
     ],
     "surfaces": [
@@ -182,9 +188,10 @@ The `--legend-config` JSON can have the settings at the root or nested under a
 
 | Key | Meaning |
 | --- | --- |
-| `curves` / `surfaces` | Legend entries, in display order. Each entry is a group name string or an object with `name` (one group) or `names` (several groups), an optional `label`, and an optional `show` (`false` hides the entry). Grouped names share one colour and one legend row; grouped surfaces are also drawn as one region with a single outer border (e.g. per-stage SubModelParts joined into one soil layer). Groups that are not listed keep their own style and border and are not shown in the legend. Without this key, all groups are listed alphabetically. |
+| `curves` / `surfaces` | Legend entries, in display order. `conditions` and `elements` are accepted as aliases (used when `curves` / `surfaces` is absent). Each entry is a group name string or an object with `name` (one group) or `names` (several groups), an optional `label`, an optional `color` (`#RRGGBB`, used for the drawing and the legend; other values are rejected), and an optional `show` (`false` hides the entry). Grouped names share one colour and one legend row; grouped surfaces are also drawn as one region with a single outer border (e.g. per-stage SubModelParts joined into one soil layer). Groups that are not listed keep their own style and border and are not shown in the legend. Without this key, all groups are listed alphabetically. |
 | `max_curves` / `max_surfaces` | Maximum number of legend rows per section (default 18). |
 | `top_left` | Legend position in SVG pixels, as `[x, y]` or `{"x": x, "y": y}` (default `[20, 20]`). |
+| `rulers` | `false` hides the coordinate rulers and the axis triad (default `true`). |
 | `phreatic_line` | Dashed line through `points` given in model coordinates (at least 2 points), with its own legend row. |
 | `symbols` | Curve names for each symbol type. The defaults are shown in the example above. Bottom curves get ground hatching; left and right curves get roller-support symbols; load curves get downward arrows joined by a top line. |
 | `msh` | MSH-only edge styling. If `shared_edges_black` is `false`, edges use the element colour. |
@@ -202,9 +209,12 @@ names:
 python geo_to_svg.py --input ..\FEA-Tools\Eemdijk\Eemdijk_blue\eemdijk.mdpa --output model.svg --legend-config examples\geo_to_svg_legend_eemdijk.json
 ```
 
-In that MDPA, `Bottom` and the side boundaries are node-only SubModelParts, so their
-hatching and fixity symbols are not drawn in MDPA mode. They are drawn in GEO mode,
-where they are physical curves.
+In that MDPA, `Bottom` and the side boundaries are node-only SubModelParts; they are
+drawn along the outer element edges, so their hatching and fixity symbols appear in
+MDPA mode too.
+
+[`geo_to_svg_legend_levee.json`](./geo_to_svg_legend_levee.json) shows the
+`conditions` / `elements` aliases with fixed entry colours.
 
 ## Tests
 

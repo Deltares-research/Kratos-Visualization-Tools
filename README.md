@@ -51,22 +51,25 @@ Legacy scripts and their documentation remain at the repository root.
   python geo_to_svg.py --input model.mdpa --output model.svg --legend-config legend.json
   ```
 
-  GEO/MSH input needs only the standard library; MDPA input reuses the package
-  MDPA parser. In MDPA mode, SubModelParts with elements or conditions become
-  drawable groups; node-only SubModelParts are not drawn.
+  The package `kratos_visualization_tools.svg` imports the MDPA parser and
+  therefore `numpy` for all inputs. In MDPA mode, SubModelParts with elements or
+  conditions become drawable groups, and node-only SubModelParts are drawn
+  along the outer element edges. After installation the same command is
+  `kratos-geo-to-svg`.
 
 - [`visualize_mdpa_project.py`](./visualize_mdpa_project.md) — interactively explore MDPA SubModelParts and, using project/stage JSON, their (de)activation and references in solver domain lists, processes, operations etc.
 - [`visualize_gid_results.py`](./visualize_gid_results.md) — visualize Kratos results stored in GiD `.post.msh` and `.post.res` files
 - [`plot_saved_results.py`](./plot_saved_results.md) — plot results saved in JSON and CSV files; also plots profiles extracted by `visualize_gid_results.py`
 
-The three interactive and plotting tools are organized under `src/kratos_visualization_tools/`
-(`geo_to_svg.py` is a standalone root script that only imports the MDPA parser):
+The tools are organized under `src/kratos_visualization_tools/`:
 `mdpa.py` parses mesh data, `project.py` reads project parameters,
 `visualization.py` provides the interactive UI, and `cli.py` handles command-line
 execution. The `gid/` subpackage separates GiD parsing, result loading,
 calculations, exports, drawing, viewers, settings, and CLI dispatch.
 The `saved_results/` subpackage separates saved-data readers, series building,
 plotting primitives, figure assembly, the viewer, configuration, and CLI dispatch.
+The `svg/` subpackage separates GEO/MSH/MDPA readers, geometry helpers, the SVG
+document, the legend, support/load symbols, rendering, and CLI dispatch.
 
 The MDPA viewer includes display-only **Separated Faces** with adjustable gap,
 node-ID lookup and local connectivity labels, plus stage activation filtering.
@@ -74,12 +77,13 @@ See the [MDPA guide](./visualize_mdpa_project.md) for geometry support and
 separation diagnostics. Original MDPA coordinates are never modified.
 
 The root scripts remain compatibility entry points, including their Python
-import APIs and module-level monkeypatch points. After installation, the other
-two tools can also be run without the root scripts:
+import its Python API. After installation, the other tools can also be run
+without the root scripts:
 
 ```bash
 kratos-visualize-gid path/to/case --list
 kratos-plot-saved-results my_config.json --output-dir ./figures
+kratos-geo-to-svg --input model.mdpa --output model.svg
 ```
 
 ## Windows launchers

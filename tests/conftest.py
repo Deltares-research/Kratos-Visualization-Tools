@@ -1,8 +1,13 @@
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 
 import visualize_gid_results as viz
+from kratos_visualization_tools.svg import document, models
+
+
+SVG = f"{{{document.SVG_NS}}}"
 
 
 @pytest.fixture
@@ -178,3 +183,104 @@ def write_stage_output(directory, stage, time, values_by_node_id):
             "TRACTION": [[value, 2.0 * value]],
         }
     (directory / f"{stage}__output.json").write_text(json.dumps(data))
+
+
+@pytest.fixture
+def curve_model():
+    return models.GeoModel(
+        points={1: (0, 0), 2: (2, 0), 3: (2, 2), 4: (0, 2)},
+        lines={
+            1: (1, 2),
+            2: (3, 2),
+            3: (3, 4),
+            4: (4, 1),
+            5: (1, 99),
+            6: (98, 99),
+        },
+        splines={7: [1, 99, 2, 3], 8: [98, 99]},
+        physical_curves={
+            "bottom": [1],
+            "joined": [1, -2],
+            "empty": [],
+            "invalid": [5, 6, 99],
+        },
+    )
+
+
+@pytest.fixture
+def two_triangle_mesh():
+    return models.MshModel(
+        nodes={1: (0, 0, 0), 2: (1, 0, 0), 3: (0, 1, 0), 4: (1, 1, 0)},
+        physical_names={1: (2, "Clay"), 2: (2, "Sand")},
+        elements=[(1, 2, [1, 2, 3], [1]), (2, 2, [2, 4, 3], [2])],
+    )
+
+
+@pytest.fixture
+def mdpa_svg_input(tmp_path):
+    source = tmp_path / "model.mdpa"
+    source.write_text(
+        """Begin Nodes
+1 0 0 0
+2 1 0 0
+3 0 1 0
+4 1 1 0
+5 0.5 0 0
+End Nodes
+Begin Elements Element2D3N
+1 0 1 2 3
+2 0 2 4 3
+End Elements
+Begin Conditions LineCondition2D3N
+1 0 1 2 5
+End Conditions
+Begin SubModelPart Soil
+Begin SubModelPartElements
+1
+2
+End SubModelPartElements
+End SubModelPart
+Begin SubModelPart Bottom
+Begin SubModelPartConditions
+1
+End SubModelPartConditions
+End SubModelPart
+Begin SubModelPart NodesOnly
+Begin SubModelPartNodes
+1
+2
+End SubModelPartNodes
+End SubModelPart
+""",
+        encoding="utf-8",
+    )
+    return source
+
+
+def _two_square_model(**groups):
+    return models.GeoModel(
+        points={1: (0, 0), 2: (1, 0), 3: (2, 0), 4: (2, 1), 5: (1, 1), 6: (0, 1)},
+        splines={1: [1, 2, 5, 6, 1], 2: [2, 3, 4, 5, 2]},
+        curve_loops={1: [1], 2: [2]},
+        plane_surfaces={1: [1], 2: [2]},
+        physical_surfaces=groups,
+    )
+
+
+def _surface_paths(output):
+    surfaces = ET.parse(output).getroot().find(f"{SVG}g[@id='physical_surfaces']")
+    paths = surfaces.findall(f"{SVG}path")
+    fills = [path for path in paths if path.attrib["stroke"] == "none"]
+    borders = [path for path in paths if path.attrib["fill"] == "none"]
+    return fills, borders
+
+
+def _square_model():
+    return models.GeoModel(
+        points={1: (0, 0), 2: (10, 0), 3: (10, 5), 4: (0, 5)},
+        lines={1: (1, 2), 2: (2, 3), 3: (3, 4), 4: (4, 1)},
+        curve_loops={1: [1, 2, 3, 4]},
+        plane_surfaces={1: [1]},
+        physical_surfaces={"Clay": [1]},
+        physical_curves={"Top": [3]},
+    )

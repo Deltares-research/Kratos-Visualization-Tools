@@ -18,6 +18,7 @@ gui = ["PySide6>=6.5"]
 kratos-visualize-mdpa = "kratos_visualization_tools.cli:main"
 kratos-visualize-gid = "kratos_visualization_tools.gid.cli:main"
 kratos-plot-saved-results = "kratos_visualization_tools.saved_results.cli:main"
+kratos-geo-to-svg = "kratos_visualization_tools.svg.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

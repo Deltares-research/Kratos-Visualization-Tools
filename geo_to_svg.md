@@ -30,16 +30,34 @@ in Inkscape or a browser, or convert it to PDF/PNG.
 
 ## Requirements
 
-- GEO and MSH input need only the Python standard library.
-- MDPA input reuses the package MDPA parser (`kratos_visualization_tools.mdpa`) and
-  therefore needs the project dependencies (`numpy`). Install them with:
+All inputs need the project dependencies (`numpy`): the converter lives in the
+`kratos_visualization_tools.svg` package, which reuses the package MDPA parser.
+Install them with:
 
-  ```bash
-  python -m pip install -e .
-  ```
+```bash
+python -m pip install -e .
+```
 
-  The script finds the package in `src/` next to the script, so you can also run it
-  from a checkout without installing.
+The root script finds the package in `src/` next to the script, so you can also run
+it from a checkout without installing. After installation the same command is
+available as `kratos-geo-to-svg`.
+
+## Code layout
+
+`geo_to_svg.py` is a thin wrapper around `src/kratos_visualization_tools/svg/`:
+
+| Module | Contents |
+| --- | --- |
+| `models.py` | `GeoModel`, `MshModel` and point/segment type aliases |
+| `geo_reader.py` | GEO parser and safe expression evaluator |
+| `msh_reader.py` | Gmsh v2/v4 mesh parser |
+| `mdpa_reader.py` | MDPA adapter: SubModelPart memberships and node-only curves |
+| `geometry.py` | Polylines, loops, segment chaining, path data, coordinate transform |
+| `document.py` | SVG skeleton, fill patterns and hashed colours |
+| `legend.py` | Legend configuration, styles and region ownership |
+| `symbols.py` | Supports, load arrows, phreatic line, rulers and axis triad |
+| `render.py` | `geo_to_svg` (GEO/MDPA) and `msh_to_svg` |
+| `cli.py` | Command-line entry point |
 
 ## Usage
 
@@ -48,6 +66,7 @@ python geo_to_svg.py --input model.geo  --output model.svg
 python geo_to_svg.py --input model.msh  --output model_mesh.svg
 python geo_to_svg.py --input model.mdpa --output model.svg
 python geo_to_svg.py --input model.mdpa --output model.svg --legend-config legend.json
+kratos-geo-to-svg --input model.mdpa --output model.svg
 ```
 
 | Option | Default | Description |
@@ -218,11 +237,16 @@ MDPA mode too.
 
 ## Tests
 
+Tests are split per module: `tests/test_svg_<module>.py`, plus
+`tests/test_geo_to_svg.py` for the root wrapper. Shared fixtures live in
+`tests/conftest.py`.
+
 ```bash
-python -m pytest tests/test_geo_to_svg.py
-python -m pytest tests/test_geo_to_svg.py --cov=geo_to_svg --cov-branch --cov-report=term-missing
+python -m pytest tests -k svg
+python -m pytest tests -k svg --cov=src/kratos_visualization_tools/svg --cov-branch --cov-report=term-missing
 ```
 
-Pass the module name (`geo_to_svg`), not the file name, to `--cov`. Coverage needs
+Pass the package path to `--cov`; the dotted module name re-imports `numpy` and
+fails with "cannot load module more than once per process". Coverage needs
 `pytest-cov`, which is not part of the `test` extra; install it with
 `python -m pip install pytest-cov`.

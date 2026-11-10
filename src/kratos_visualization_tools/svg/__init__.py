@@ -29,6 +29,7 @@ Legend config schema (root object, or nested under "legend"):
     - "max_curves": int, "max_surfaces": int
     - "rulers": false (hide coordinate rulers and the axis triad)
     - "top_left": [x, y] or {"x": x, "y": y} (legend top-left anchor in SVG pixels)
+    - "font_sizes": {"title": 14, "label": 11} (legend font sizes; spacing scales with "label")
     - "phreatic_line": {"label": "...", "points": [[x1, y1], [x2, y2], ...]}
     - "symbols": {
           "bottom_hatch_curves": ["Bottom"],

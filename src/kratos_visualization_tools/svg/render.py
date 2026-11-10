@@ -165,59 +165,68 @@ def geo_to_svg(
         _draw_rulers_and_triad(svg, width, height, padding, xmin, xmax, ymin, ymax, tr)
 
     # Place legend using explicit top-left coordinates from config.
+    # Spacing and swatches scale with the label font (11 px reproduces the defaults).
     lx = float(legend_spec.legend_top_left[0])
     ly = float(legend_spec.legend_top_left[1])
-    lx2 = lx + 360.0
-    
+    title_fs = f"{legend_spec.title_font_size:g}"
+    label_fs = f"{legend_spec.label_font_size:g}"
+    k = legend_spec.label_font_size / 11.0
+    title_gap = legend_spec.title_font_size + 4.0 * k
+    row_h = 16.0 * k
+    text_dx = 24.0 * k
+    lx2 = lx + 360.0 * k
+
     ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx), "y": str(ly), "font-size": "14", "font-family": "DejaVu Sans", "fill": "#111"
+        "x": str(lx), "y": str(ly), "font-size": title_fs, "font-family": "DejaVu Sans", "fill": "#111"
     }).text = "Physical Curves (conditions)"
 
-    y = ly + 18
+    y = ly + title_gap
     curve_legend = legend_spec.curve_entries[: max(0, legend_spec.max_curve_items)]
     for entry in curve_legend:
         color = legend_spec.color(entry.style_key)
         ET.SubElement(g_legend, f"{{{SVG_NS}}}line", {
-            "x1": str(lx), "y1": str(y), "x2": str(lx + 18), "y2": str(y),
+            "x1": str(lx), "y1": str(y), "x2": str(lx + 18 * k), "y2": str(y),
             "stroke": color, "stroke-width": "3"
         })
         ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-            "x": str(lx + 24), "y": str(y + 4), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
+            "x": str(lx + text_dx), "y": str(y + 4 * k), "font-size": label_fs, "font-family": "DejaVu Sans", "fill": "#111"
         }).text = entry.label
-        y += 16
-    
+        y += row_h
+
     # Draw phreatic line in legend if provided
     if legend_spec.phreatic_line_label and legend_spec.phreatic_line_points:
-        y += 8  # Add extra space before phreatic line
+        y += 8 * k  # Add extra space before phreatic line
         ET.SubElement(g_legend, f"{{{SVG_NS}}}line", {
-            "x1": str(lx), "y1": str(y - 4), "x2": str(lx + 18), "y2": str(y - 4),
+            "x1": str(lx), "y1": str(y - 4 * k), "x2": str(lx + 18 * k), "y2": str(y - 4 * k),
             "stroke": "#0066cc", "stroke-width": "2", "stroke-dasharray": "5,3"
         })
         ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-            "x": str(lx + 24), "y": str(y), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
+            "x": str(lx + text_dx), "y": str(y), "font-size": label_fs, "font-family": "DejaVu Sans", "fill": "#111"
         }).text = legend_spec.phreatic_line_label
 
     ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx2), "y": str(ly), "font-size": "14", "font-family": "DejaVu Sans", "fill": "#111"
+        "x": str(lx2), "y": str(ly), "font-size": title_fs, "font-family": "DejaVu Sans", "fill": "#111"
     }).text = "Physical Surfaces (elements)"
 
-    y2 = ly + 18
+    y2 = ly + title_gap
     surface_legend = legend_spec.surface_entries[: max(0, legend_spec.max_surface_items)]
     for entry in surface_legend:
         color = legend_spec.color(entry.style_key)
         pat = _pick_pattern(entry.style_key)
+        swatch = {
+            "x": str(lx2), "y": str(y2 - 10 * k),
+            "width": f"{16 * k:g}", "height": f"{12 * k:g}",
+        }
         ET.SubElement(g_legend, f"{{{SVG_NS}}}rect", {
-            "x": str(lx2), "y": str(y2 - 10), "width": "16", "height": "12",
-            "fill": color, "fill-opacity": "0.25", "stroke": color, "stroke-width": "1"
+            **swatch, "fill": color, "fill-opacity": "0.25", "stroke": color, "stroke-width": "1"
         })
         ET.SubElement(g_legend, f"{{{SVG_NS}}}rect", {
-            "x": str(lx2), "y": str(y2 - 10), "width": "16", "height": "12",
-            "fill": f"url(#{pat})", "fill-opacity": "0.45", "stroke": "none"
+            **swatch, "fill": f"url(#{pat})", "fill-opacity": "0.45", "stroke": "none"
         })
         ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-            "x": str(lx2 + 24), "y": str(y2), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
+            "x": str(lx2 + text_dx), "y": str(y2), "font-size": label_fs, "font-family": "DejaVu Sans", "fill": "#111"
         }).text = entry.label
-        y2 += 16
+        y2 += row_h
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(svg).write(out_path, encoding="utf-8", xml_declaration=True)
@@ -397,22 +406,25 @@ def msh_to_svg(
 
     lx = 20
     ly = 24
-    ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx), "y": str(ly), "font-size": "14", "font-family": "DejaVu Sans", "fill": "#111"
-    }).text = "Mesh view (.msh input)"
-    ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx), "y": str(ly + 18), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
-    }).text = f"Elements rendered: {len(polygons)} (line-only view)"
-    ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx), "y": str(ly + 34), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
-    }).text = "Edges: surface style colors"
-    ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-        "x": str(lx), "y": str(ly + 50), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
-    }).text = "Boundary conditions: curve style colors"
+    title_fs = f"{legend_spec.title_font_size:g}"
+    label_fs = f"{legend_spec.label_font_size:g}"
+    k = legend_spec.label_font_size / 11.0
+    lines = [
+        f"Elements rendered: {len(polygons)} (line-only view)",
+        "Edges: surface style colors",
+        "Boundary conditions: curve style colors",
+    ]
     if shared_edges_black:
+        lines.append("Interfaces between surface styles: black")
+    ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
+        "x": str(lx), "y": str(ly), "font-size": title_fs, "font-family": "DejaVu Sans", "fill": "#111"
+    }).text = "Mesh view (.msh input)"
+    y = ly + legend_spec.title_font_size + 4.0 * k
+    for text in lines:
         ET.SubElement(g_legend, f"{{{SVG_NS}}}text", {
-            "x": str(lx), "y": str(ly + 66), "font-size": "11", "font-family": "DejaVu Sans", "fill": "#111"
-        }).text = "Interfaces between surface styles: black"
+            "x": str(lx), "y": f"{y:g}", "font-size": label_fs, "font-family": "DejaVu Sans", "fill": "#111"
+        }).text = text
+        y += 16.0 * k
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(svg).write(out_path, encoding="utf-8", xml_declaration=True)

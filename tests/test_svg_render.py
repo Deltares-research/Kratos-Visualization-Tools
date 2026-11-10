@@ -347,3 +347,57 @@ def test_msh_to_svg_uses_configured_colors_and_optional_rulers(tmp_path, rulers)
     assert strokes == {"#00ff00", "#0000ff"}
     assert (root.find(f"{SVG}g[@id='coordinate_rulers']") is not None) is rulers
     assert (root.find(f"{SVG}g[@id='axes_triad']") is not None) is rulers
+
+
+def _legend_texts(output):
+    group = ET.parse(output).getroot().find(f"{SVG}g[@id='legend']")
+    return group, group.findall(f"{SVG}text")
+
+
+def test_geo_to_svg_legend_uses_default_font_sizes_and_layout(tmp_path):
+    output = tmp_path / "legend_default.svg"
+
+    render.geo_to_svg(_square_model(), output, 400, 300, 20, legend_cfg={
+        "rulers": False, "top_left": [10, 30],
+    })
+
+    group, texts = _legend_texts(output)
+    assert [t.attrib["font-size"] for t in texts] == ["14", "11", "14", "11"]
+    assert [(t.attrib["x"], t.attrib["y"]) for t in texts] == [
+        ("10.0", "30.0"), ("34.0", "52.0"), ("370.0", "30.0"), ("394.0", "48.0"),
+    ]
+    rect = group.find(f"{SVG}rect")
+    assert (rect.attrib["width"], rect.attrib["height"], rect.attrib["y"]) == ("16", "12", "38.0")
+
+
+def test_geo_to_svg_legend_scales_layout_with_configured_font_sizes(tmp_path):
+    output = tmp_path / "legend_large.svg"
+
+    render.geo_to_svg(_square_model(), output, 400, 300, 20, legend_cfg={
+        "rulers": False, "top_left": [10, 30],
+        "font_sizes": {"title": 28, "label": 22},
+        "phreatic_line": {"label": "Water", "points": [[0, 4], [10, 4]]},
+    })
+
+    group, texts = _legend_texts(output)
+    assert [t.attrib["font-size"] for t in texts] == ["28", "22", "22", "28", "22"]
+    # Label size 22 doubles spacing: title gap 28 + 8, rows 32, text offset 48.
+    title, top, water, surfaces_title, clay = texts
+    assert (top.attrib["x"], top.attrib["y"]) == ("58.0", "74.0")
+    assert (water.attrib["x"], water.attrib["y"]) == ("58.0", "114.0")
+    assert surfaces_title.attrib["x"] == "730.0"
+    assert (clay.attrib["x"], clay.attrib["y"]) == ("778.0", "66.0")
+    rect = group.find(f"{SVG}rect")
+    assert (rect.attrib["width"], rect.attrib["height"], rect.attrib["y"]) == ("32", "24", "46.0")
+
+
+def test_msh_to_svg_legend_uses_configured_font_sizes(two_triangle_mesh, tmp_path):
+    output = tmp_path / "mesh_fonts.svg"
+
+    render.msh_to_svg(two_triangle_mesh, output, 400, 300, 20, legend_cfg={
+        "rulers": False, "font_sizes": {"title": 20, "label": 22},
+    })
+
+    _group, texts = _legend_texts(output)
+    assert [t.attrib["font-size"] for t in texts] == ["20"] + ["22"] * (len(texts) - 1)
+    assert [t.attrib["y"] for t in texts[:3]] == ["24", "52", "84"]

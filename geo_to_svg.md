@@ -175,6 +175,7 @@ The `--legend-config` JSON can have the settings at the root or nested under a
 {
   "legend": {
     "top_left": [40, 40],
+    "font_sizes": {"title": 14, "label": 11},
     "max_curves": 18,
     "max_surfaces": 18,
     "curves": [
@@ -210,6 +211,7 @@ The `--legend-config` JSON can have the settings at the root or nested under a
 | `curves` / `surfaces` | Legend entries, in display order. `conditions` and `elements` are accepted as aliases (used when `curves` / `surfaces` is absent). Each entry is a group name string or an object with `name` (one group) or `names` (several groups), an optional `label`, an optional `color` (`#RRGGBB`, used for the drawing and the legend; other values are rejected), and an optional `show` (`false` hides the entry). Grouped names share one colour and one legend row; grouped surfaces are also drawn as one region with a single outer border (e.g. per-stage SubModelParts joined into one soil layer). Groups that are not listed keep their own style and border and are not shown in the legend. Without this key, all groups are listed alphabetically. |
 | `max_curves` / `max_surfaces` | Maximum number of legend rows per section (default 18). |
 | `top_left` | Legend position in SVG pixels, as `[x, y]` or `{"x": x, "y": y}` (default `[20, 20]`). |
+| `font_sizes` | Legend font sizes in SVG pixels: `title` for section headings (default `14`) and `label` for entry rows (default `11`). Either key may be omitted. Row spacing, swatches and the offset of the second column scale with `label`. Non-positive or non-numeric values are rejected. |
 | `rulers` | `false` hides the coordinate rulers and the axis triad (default `true`). |
 | `phreatic_line` | Dashed line through `points` given in model coordinates (at least 2 points), with its own legend row. |
 | `symbols` | Curve names for each symbol type. The defaults are shown in the example above. Bottom curves get ground hatching; left and right curves get roller-support symbols; load curves get downward arrows joined by a top line. |

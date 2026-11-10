@@ -30,6 +30,8 @@ class LegendSpec:
     phreatic_line_points: Optional[List[Tuple[float, float]]] = None
     legend_top_left: Tuple[float, float] = (20.0, 20.0)
     show_rulers: bool = True
+    title_font_size: float = 14.0
+    label_font_size: float = 11.0
 
     def color(self, style_key: str) -> str:
         """Return the configured entry color for a style, else a hashed one."""
@@ -37,6 +39,22 @@ class LegendSpec:
             if entry.style_key == style_key and entry.color:
                 return entry.color
         return _hash_color(style_key)
+
+
+def _font_sizes(raw: Any) -> Tuple[float, float]:
+    """Return (title, label) legend font sizes from a "font_sizes" config value."""
+    title, label = 14.0, 11.0
+    if raw is None:
+        return title, label
+    if not isinstance(raw, dict):
+        raise ValueError('Legend "font_sizes" must be an object like {"title": 14, "label": 11}')
+    sizes = []
+    for key, default in (("title", title), ("label", label)):
+        value = raw.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise ValueError(f'Legend font size "{key}" must be a positive number, got {value!r}')
+        sizes.append(float(value))
+    return sizes[0], sizes[1]
 
 
 def _parse_legend_entry(raw: Any, kind: str) -> Optional[Tuple[List[str], str]]:
@@ -190,7 +208,9 @@ def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) ->
             )
         except (ValueError, TypeError):
             legend_top_left = (20.0, 20.0)
-    
+
+    title_font_size, label_font_size = _font_sizes(legend_cfg.get("font_sizes"))
+
     return LegendSpec(
         curve_entries=curve_entries,
         surface_entries=surface_entries,
@@ -202,4 +222,6 @@ def _build_legend_spec(model: GeoModel, legend_cfg: Optional[Dict[str, Any]]) ->
         phreatic_line_points=phreatic_line_points,
         legend_top_left=legend_top_left,
         show_rulers=legend_cfg.get("rulers", True) is not False,
+        title_font_size=title_font_size,
+        label_font_size=label_font_size,
     )

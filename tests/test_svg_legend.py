@@ -185,6 +185,42 @@ def test_configured_legend_color_rejects_invalid_values(color):
         legend._configured_legend_color({"color": color})
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, (14.0, 11.0)),
+        ({}, (14.0, 11.0)),
+        ({"title": 20}, (20.0, 11.0)),
+        ({"title": 18, "label": 13.5}, (18.0, 13.5)),
+    ],
+)
+def test_font_sizes_use_defaults_for_missing_values(raw, expected):
+    assert legend._font_sizes(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        (12, "must be an object"),
+        ({"title": 0}, '"title" must be a positive number'),
+        ({"label": -1}, '"label" must be a positive number'),
+        ({"label": "11"}, '"label" must be a positive number'),
+        ({"title": True}, '"title" must be a positive number'),
+    ],
+)
+def test_font_sizes_reject_invalid_values(raw, message):
+    with pytest.raises(ValueError, match=message):
+        legend._font_sizes(raw)
+
+
+def test_build_legend_spec_reads_font_sizes():
+    spec = legend._build_legend_spec(
+        models.GeoModel(), {"font_sizes": {"title": 22, "label": 16}}
+    )
+
+    assert (spec.title_font_size, spec.label_font_size) == (22.0, 16.0)
+
+
 def test_build_legend_spec_accepts_conditions_and_elements_aliases():
     model = models.GeoModel(
         physical_curves={"Head": [1], "Other": [2]},

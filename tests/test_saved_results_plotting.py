@@ -25,6 +25,29 @@ def test_linear_ticks_show_full_values_without_offset(coordinate):
         primitives.plt.close(figure)
 
 
+def test_dense_linear_x_axis_uses_spaced_readable_ticks():
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots(figsize=(6.4, 4.8), layout="constrained")
+    try:
+        x_values = [-index / 5000 for index in range(1001)]
+        axes.plot(x_values, [index for index in range(len(x_values))])
+        primitives._apply_axis_options(axes, primitives.AxisOptions())
+        figure.canvas.draw()
+
+        visible_labels = [
+            label
+            for value, label in zip(axes.get_xticks(), axes.get_xticklabels())
+            if axes.get_xlim()[0] <= value <= axes.get_xlim()[1] and label.get_text()
+        ]
+        assert len(visible_labels) <= 7
+        renderer = figure.canvas.get_renderer()
+        boxes = [label.get_window_extent(renderer) for label in visible_labels]
+        assert all(left.x1 < right.x0 for left, right in zip(boxes, boxes[1:]))
+    finally:
+        primitives.plt.close(figure)
+
+
 def test_log_x_labels_are_compact_and_do_not_overlap():
     from kratos_visualization_tools.saved_results import primitives
 

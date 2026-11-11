@@ -34,6 +34,11 @@ python plot_saved_results.py --print-schema unused.json
 **All together** or **One by one** (with **< Previous** / **Next >**), and **Save** writes
 all figures to the output directory.
 
+SVG output (selected by a `.svg` filename) uses simplified plot paths and keeps labels as
+SVG text rather than converting each character to vector outlines. This reduces file
+size while keeping plot-line simplification within one SVG pixel; it does not affect
+other output formats.
+
 **Add profile…** imports one or more saved profile CSVs into the selected graph.
 In **All together** mode, click a graph to select it (its title shows
 `[selected]`); in **One by one** mode, the displayed graph is selected.

@@ -99,7 +99,17 @@ _pending_figures: list[PendingFigure] | None = None
 def _write(figure, plot_file_path: Path):
     plot_file_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Saving plot to {plot_file_path.resolve()}")
-    figure.savefig(plot_file_path, bbox_inches="tight")
+    if plot_file_path.suffix.lower() == ".svg":
+        with plt.rc_context(
+            {
+                "path.simplify": True,
+                "path.simplify_threshold": 1.0,
+                "svg.fonttype": "none",
+            }
+        ):
+            figure.savefig(plot_file_path, bbox_inches="tight")
+    else:
+        figure.savefig(plot_file_path, bbox_inches="tight")
 
 
 def _render_preview(figure):

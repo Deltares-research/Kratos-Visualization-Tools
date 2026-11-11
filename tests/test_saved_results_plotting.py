@@ -48,6 +48,32 @@ def test_log_x_labels_are_compact_and_do_not_overlap():
         primitives.plt.close(figure)
 
 
+def test_svg_output_keeps_text_and_simplifies_plot_paths(tmp_path):
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots()
+    try:
+        points = [(index / 1000, (index / 1000) ** 2) for index in range(10000)]
+        axes.plot(*zip(*points))
+        axes.set_xlabel("Coordinate")
+        axes.set_ylabel("Value")
+
+        reference = tmp_path / "unsimplified.svg"
+        with primitives.plt.rc_context(
+            {"path.simplify": False, "svg.fonttype": "none"}
+        ):
+            figure.savefig(reference, bbox_inches="tight")
+
+        optimized = tmp_path / "optimized.svg"
+        primitives._write(figure, optimized)
+
+        output = optimized.read_text(encoding="utf-8")
+        assert "<text" in output
+        assert optimized.stat().st_size < reference.stat().st_size
+    finally:
+        primitives.plt.close(figure)
+
+
 def test_legacy_pending_figures_state_is_live(monkeypatch, tmp_path):
     from kratos_visualization_tools import saved_results
 

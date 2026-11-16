@@ -191,8 +191,14 @@ Common figure options:
 Logarithmic x axes use compact numeric labels at 1, 2 and 5 times each
 power of ten. Minor tick labels are hidden to keep narrow pressure ranges legible.
 Linear axes show full numeric tick values without additive offsets or
-scientific-notation multipliers (for example, `-300.020` rather than `-0.020`
-with a separate `-3e2` offset). For a linear x axis, the plotter uses fewer
+scientific-notation multipliers. When all plotted y values are strictly within
+`(-0.001, 0.001)`, an automatically scaled linear y axis defaults to
+`[-0.001, 0.001]`, in the units shown on that axis after series scaling.
+An explicit `ylim` overrides this default, including for smaller ranges;
+logarithmic y axes are unaffected. For example, `"ylim": [-0.00000005, 0.00000005]`
+shows values close to zero in more detail.
+
+For a linear x axis, the plotter uses fewer
 major ticks when `2 * (xmax - xmin) / (abs(xmin) + abs(xmax)) < 0.01`, where
 `xmin` and `xmax` are the current axis limits. This helps keep tick labels
 readable when the range is very small relative to its values.

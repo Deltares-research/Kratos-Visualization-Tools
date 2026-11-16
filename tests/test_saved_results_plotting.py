@@ -6,12 +6,12 @@ import plot_saved_results as psr
 
 
 @pytest.mark.parametrize("coordinate", ["x", "y"])
-def test_linear_ticks_show_full_values_without_offset(coordinate):
+@pytest.mark.parametrize("values", [(-300.020, -299.995), (0.0, 0.0), (1e7, 2e7)])
+def test_linear_ticks_show_full_values_without_offset(coordinate, values):
     from kratos_visualization_tools.saved_results import primitives
 
     figure, axes = primitives.plt.subplots(layout="constrained")
     try:
-        values = [-300.020, -299.995]
         axes.plot(values if coordinate == "x" else [0, 10],
                   values if coordinate == "y" else [0, 10])
         primitives._apply_axis_options(axes, primitives.AxisOptions())
@@ -21,6 +21,82 @@ def test_linear_ticks_show_full_values_without_offset(coordinate):
         for value, label in zip(axis.get_ticklocs(), axis.get_ticklabels()):
             text = label.get_text().replace("\N{MINUS SIGN}", "-")
             assert float(text) == pytest.approx(value, abs=1e-6)
+    finally:
+        primitives.plt.close(figure)
+
+
+@pytest.mark.parametrize("values", [(-2e-15, 3e-15), (-3e-7, -1e-7), (0.0, 0.0),
+                                     (0.0009, 0.00099)])
+def test_near_zero_y_data_use_default_limits_without_multiplier(values):
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        axes.plot([0, 10], values)
+        primitives._apply_axis_options(axes, primitives.AxisOptions())
+        figure.canvas.draw()
+        assert axes.get_ylim() == pytest.approx((-0.001, 0.001))
+        assert axes.yaxis.get_offset_text().get_text() == ""
+        for value, label in zip(axes.yaxis.get_ticklocs(), axes.yaxis.get_ticklabels()):
+            text = label.get_text().replace("\N{MINUS SIGN}", "-")
+            assert float(text) == pytest.approx(value, abs=1e-12)
+    finally:
+        primitives.plt.close(figure)
+
+
+def test_explicit_y_limits_override_default_and_show_full_values():
+    from kratos_visualization_tools.saved_results import figures, primitives
+
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        axes.plot([0, 1], [-2e-8, 3e-8])
+        options = figures._axis_options({"ylim": [-5e-8, 5e-8]}, {})
+        primitives._apply_axis_options(axes, options)
+        figure.canvas.draw()
+        assert axes.get_ylim() == pytest.approx((-5e-8, 5e-8))
+        assert axes.yaxis.get_offset_text().get_text() == ""
+        for value, label in zip(axes.yaxis.get_ticklocs(), axes.yaxis.get_ticklabels()):
+            text = label.get_text().replace("\N{MINUS SIGN}", "-")
+            assert float(text) == pytest.approx(value, abs=1e-15)
+    finally:
+        primitives.plt.close(figure)
+
+
+@pytest.mark.parametrize("values", [(0.0, 0.001), (-0.002, 0.0)])
+def test_y_data_at_or_beyond_threshold_keep_autoscaling(values):
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots()
+    try:
+        axes.plot([0, 1], values)
+        expected = axes.get_ylim()
+        primitives._apply_axis_options(axes, primitives.AxisOptions())
+        assert axes.get_ylim() == pytest.approx(expected)
+    finally:
+        primitives.plt.close(figure)
+
+
+def test_near_zero_y_limits_do_not_apply_to_log_axes():
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots()
+    try:
+        axes.plot([0, 1], [1e-8, 1e-7])
+        primitives._apply_axis_options(axes, primitives.AxisOptions(yscale="log"))
+        assert axes.get_ylim()[0] > 0
+        assert axes.get_ylim()[1] < 0.001
+    finally:
+        primitives.plt.close(figure)
+
+
+def test_near_zero_default_respects_inverted_y_axis():
+    from kratos_visualization_tools.saved_results import primitives
+
+    figure, axes = primitives.plt.subplots()
+    try:
+        axes.plot([0, 1], [-1e-8, 1e-8])
+        primitives._apply_axis_options(axes, primitives.AxisOptions(invert_yaxis=True))
+        assert axes.get_ylim() == pytest.approx((0.001, -0.001))
     finally:
         primitives.plt.close(figure)
 

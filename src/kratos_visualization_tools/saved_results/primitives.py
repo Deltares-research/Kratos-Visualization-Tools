@@ -73,6 +73,10 @@ def _apply_axis_options(axes, options: AxisOptions):
         axes.set_xlim(options.xlim)
     if options.ylim is not None:
         axes.set_ylim(options.ylim)
+    elif axes.yaxis.get_scale() == "linear":
+        y_min, y_max = axes.dataLim.intervaly
+        if math.isfinite(y_min) and math.isfinite(y_max) and max(abs(y_min), abs(y_max)) < 1e-3:
+            axes.set_ylim(-1e-3, 1e-3)
     for axis in (axes.xaxis, axes.yaxis):
         if axis.get_scale() == "linear":
             formatter = ScalarFormatter(useOffset=False)

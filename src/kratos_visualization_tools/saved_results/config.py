@@ -34,6 +34,8 @@ CONFIG_DOC = """
     {
             "template": "wall_profile",
             "name": "moments.svg",
+            "xlim": [0.0, 100.0],             // optional [min, max] axis bounds
+            "ylim": [-10.0, 10.0],            // omit for automatic bounds
             "series": [{"template": "kratos_wall", "variable": "BENDING_MOMENT"}]
     }
   ]

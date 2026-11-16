@@ -48,6 +48,77 @@ def test_dense_linear_x_axis_uses_spaced_readable_ticks():
         primitives.plt.close(figure)
 
 
+def test_configured_axis_limits_prevent_close_value_tick_overlap():
+    from kratos_visualization_tools.saved_results import figures, primitives
+
+    values = [
+        (166.67641666666668, 200.01170000000002),
+        (166.6763966666667, 200.01167),
+    ]
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        for (x_value, y_value), label in zip(
+            values, ("SSC UDSM summary", "Native SSC summary")
+        ):
+            axes.plot([x_value], [y_value], marker="^", linestyle="None", label=label)
+        options = figures._axis_options(
+            {"xlim": [165.0, 168.0], "ylim": [199.0, 201.0]}, {}
+        )
+        primitives._apply_axis_options(axes, options)
+        figure.legend(loc="outside center right")
+        figure.canvas.draw()
+
+        assert axes.get_xlim() == (165.0, 168.0)
+        assert axes.get_ylim() == (199.0, 201.0)
+        renderer = figure.canvas.get_renderer()
+        visible_labels = [
+            label
+            for value, label in zip(axes.get_xticks(), axes.get_xticklabels())
+            if axes.get_xlim()[0] <= value <= axes.get_xlim()[1] and label.get_text()
+        ]
+        boxes = [label.get_window_extent(renderer) for label in visible_labels]
+        assert all(left.x1 < right.x0 for left, right in zip(boxes, boxes[1:]))
+    finally:
+        primitives.plt.close(figure)
+
+
+@pytest.mark.parametrize(
+    "x_values",
+    [
+        (166.67641666666668, 166.6763966666667),
+        (-166.67641666666668, -166.6763966666667),
+    ],
+)
+def test_close_linear_x_range_reduces_ticks_to_prevent_overlap(x_values):
+    from kratos_visualization_tools.saved_results import primitives
+
+    values = [
+        (x_values[0], 200.01170000000002),
+        (x_values[1], 200.01167),
+    ]
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        for (x_value, y_value), label in zip(
+            values, ("SSC UDSM summary", "Native SSC summary")
+        ):
+            axes.plot([x_value], [y_value], marker="^", linestyle="None", label=label)
+        primitives._apply_axis_options(axes, primitives.AxisOptions())
+        figure.legend(loc="outside center right")
+        figure.canvas.draw()
+
+        visible_labels = [
+            label
+            for value, label in zip(axes.get_xticks(), axes.get_xticklabels())
+            if axes.get_xlim()[0] <= value <= axes.get_xlim()[1] and label.get_text()
+        ]
+        assert len(visible_labels) == 2
+        renderer = figure.canvas.get_renderer()
+        boxes = [label.get_window_extent(renderer) for label in visible_labels]
+        assert all(left.x1 < right.x0 for left, right in zip(boxes, boxes[1:]))
+    finally:
+        primitives.plt.close(figure)
+
+
 def test_log_x_labels_are_compact_and_do_not_overlap():
     from kratos_visualization_tools.saved_results import primitives
 

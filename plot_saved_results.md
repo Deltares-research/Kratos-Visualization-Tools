@@ -180,6 +180,7 @@ Common figure options:
 | `xlabel`, `ylabel` | — | axis labels; `ylabel` is drawn on the first column only |
 | `xscale`, `yscale` | linear | e.g. `"log"` |
 | `log_y` | `false` | shorthand for `"yscale": "log"` |
+| `xlim`, `ylim` | automatic | explicit axis limits as `[min, max]`; useful when close values produce overly precise, overlapping tick labels |
 | `invert_yaxis` | `false` | invert the y axis |
 | `max_plots_per_row` | `5` | subplot layout |
 | `figsize` | `[20, 6]` | figure size in inches |
@@ -191,7 +192,10 @@ Logarithmic x axes use compact numeric labels at 1, 2 and 5 times each
 power of ten. Minor tick labels are hidden to keep narrow pressure ranges legible.
 Linear axes show full numeric tick values without additive offsets or
 scientific-notation multipliers (for example, `-300.020` rather than `-0.020`
-with a separate `-3e2` offset).
+with a separate `-3e2` offset). For a linear x axis, the plotter uses fewer
+major ticks when `2 * (xmax - xmin) / (abs(xmin) + abs(xmax)) < 0.01`, where
+`xmin` and `xmax` are the current axis limits. This helps keep tick labels
+readable when the range is very small relative to its values.
 
 ### Series
 

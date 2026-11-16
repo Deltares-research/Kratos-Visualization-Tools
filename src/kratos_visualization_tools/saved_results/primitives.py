@@ -36,6 +36,8 @@ class AxisOptions:
     ylabel: str | None = None
     xscale: str | None = None
     yscale: str | None = None
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
     invert_yaxis: bool = False
 
 
@@ -67,13 +69,23 @@ def _apply_axis_options(axes, options: AxisOptions):
             axes.xaxis.set_minor_formatter(NullFormatter())
     if options.yscale:
         axes.set_yscale(options.yscale, nonpositive="mask")
+    if options.xlim is not None:
+        axes.set_xlim(options.xlim)
+    if options.ylim is not None:
+        axes.set_ylim(options.ylim)
     for axis in (axes.xaxis, axes.yaxis):
         if axis.get_scale() == "linear":
             formatter = ScalarFormatter(useOffset=False)
             formatter.set_scientific(False)
             axis.set_major_formatter(formatter)
     if axes.xaxis.get_scale() == "linear":
-        axes.xaxis.set_major_locator(MaxNLocator(nbins=6))
+        x_min, x_max = sorted(axes.get_xlim())
+        magnitude_sum = abs(x_min) + abs(x_max)
+        relative_range = (
+            2 * (x_max - x_min) / magnitude_sum if magnitude_sum else None
+        )
+        nbins = 2 if relative_range is not None and relative_range < 0.01 else 6
+        axes.xaxis.set_major_locator(MaxNLocator(nbins=nbins))
     if options.title:
         axes.set_title(options.title)
     if options.xlabel:

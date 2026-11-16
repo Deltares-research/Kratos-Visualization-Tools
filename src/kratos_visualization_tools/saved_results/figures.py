@@ -15,6 +15,8 @@ def _axis_options(spec: dict[str, Any], context: dict[str, Any]) -> AxisOptions:
         ylabel=spec.get("ylabel"),
         xscale=spec.get("xscale"),
         yscale="log" if spec.get("log_y") else spec.get("yscale"),
+        xlim=tuple(spec["xlim"]) if spec.get("xlim") is not None else None,
+        ylim=tuple(spec["ylim"]) if spec.get("ylim") is not None else None,
         invert_yaxis=spec.get("invert_yaxis", False),
     )
 

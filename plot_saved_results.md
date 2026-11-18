@@ -182,6 +182,7 @@ Common figure options:
 | `log_y` | `false` | shorthand for `"yscale": "log"` |
 | `xlim`, `ylim` | automatic | explicit axis limits as `[min, max]`; useful when close values produce overly precise, overlapping tick labels |
 | `invert_yaxis` | `false` | invert the y axis |
+| `aspect` | automatic | `"equal"` gives equal physical lengths per x/y unit, useful for Mohr circles; `"auto"` or a positive numeric ratio is also accepted |
 | `max_plots_per_row` | `5` | subplot layout |
 | `figsize` | `[20, 6]` | figure size in inches |
 | `per_stage_files` | `false` | `single` only: write one file per stage |
@@ -246,6 +247,50 @@ value of the current node, giving `(time, value)` points.
 
 Comma-separated and whitespace-separated files are both supported; a header row is
 detected automatically (a first row that cannot be parsed as numbers).
+
+**`"source": "mohr_circle"`**
+
+Read two principal-stress columns from a CSV/text file and draw their
+upper Mohr semicircle. This accepts the CSV options above; `x_column`
+and `y_column` hold the two extreme principal stresses, not precomputed
+circle coordinates. Column scales/offsets are applied to the stresses
+before constructing the circle. `row_index` selects a retained stress
+pair after CSV filtering/missing-value removal and any requested sorting;
+it defaults to `-1` (the last retained pair). Omit `sort_by` to preserve
+loading order. Invalid row indices or nonfinite selected stresses are errors.
+
+The center is `(sigma_1 + sigma_3)/2`, the radius is
+`abs(sigma_1 - sigma_3)/2`, and the axes are normal stress versus shear
+stress. A hydrostatic state is shown as a point. Use `"aspect": "equal"`
+on the figure to keep circles circular.
+
+For axisymmetric triaxial compression with tension-positive saved
+components and zero shear, for example:
+
+```json
+{
+  "name": "{stage}__mohr_circles.png",
+  "type": "single",
+  "per_stage_files": true,
+  "aspect": "equal",
+  "xlabel": "Effective normal stress (compression-positive kPa)",
+  "ylabel": "Shear stress (kPa)",
+  "series": [{
+    "source": "mohr_circle",
+    "file": "{stage}__native.csv",
+    "x_column": "SigxxE",
+    "y_column": "SigyyE",
+    "x_scale": -1,
+    "y_scale": -1,
+    "row_index": -1
+  }]
+}
+```
+
+These are circles for the selected stress state, not shear-stress paths
+over the entire loading history. For general non-axisymmetric/sheared
+states, supply actual extreme principal stresses rather than assuming
+normal tensor components are principal stresses.
 
 ### Placeholders
 

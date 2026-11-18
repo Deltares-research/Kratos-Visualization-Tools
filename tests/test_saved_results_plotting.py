@@ -5,6 +5,21 @@ import pytest
 import plot_saved_results as psr
 
 
+def test_equal_aspect_keeps_mohr_circle_radii_equal_on_screen():
+    from kratos_visualization_tools.saved_results import figures, primitives
+
+    figure, axes = primitives.plt.subplots(layout="constrained")
+    try:
+        axes.plot([50, 150], [0, 50])
+        options = figures._axis_options({"aspect": "equal"}, {})
+        primitives._apply_axis_options(axes, options)
+        figure.canvas.draw()
+        center, right, top = axes.transData.transform([(100, 0), (150, 0), (100, 50)])
+        assert right[0] - center[0] == pytest.approx(top[1] - center[1])
+    finally:
+        primitives.plt.close(figure)
+
+
 @pytest.mark.parametrize("coordinate", ["x", "y"])
 @pytest.mark.parametrize("values", [(-300.020, -299.995), (0.0, 0.0), (1e7, 2e7)])
 def test_linear_ticks_show_full_values_without_offset(coordinate, values):

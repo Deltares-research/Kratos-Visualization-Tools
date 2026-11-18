@@ -39,6 +39,7 @@ class AxisOptions:
     xlim: tuple[float, float] | None = None
     ylim: tuple[float, float] | None = None
     invert_yaxis: bool = False
+    aspect: str | float | None = None
 
 
 def _plot_on_axis(axes, series_collection: Iterable[DataSeries]):
@@ -96,6 +97,8 @@ def _apply_axis_options(axes, options: AxisOptions):
         axes.set_xlabel(options.xlabel)
     if options.ylabel:
         axes.set_ylabel(options.ylabel)
+    if options.aspect is not None:
+        axes.set_aspect(options.aspect, adjustable="box")
     axes.yaxis.set_inverted(options.invert_yaxis)
 
 

@@ -102,6 +102,66 @@ class TestKratosJsonSeries:
 
 
 class TestCsvSeries:
+    @pytest.mark.parametrize(
+        "row_index,center,radius", [(-1, 100.0, 50.0), (0, 40.0, 20.0)]
+    )
+    def test_mohr_circle_uses_scaled_stresses_at_selected_row(
+        self, builder, case_dir, row_index, center, radius
+    ):
+        (case_dir / "stress.csv").write_text(
+            "minor,major\n-20,-60\n-50,-150\n"
+        )
+        series = builder.build(
+            {
+                "source": "mohr_circle", "file": "stress.csv",
+                "x_column": "minor", "y_column": "major",
+                "x_scale": -1, "y_scale": -1, "row_index": row_index,
+            },
+            {},
+        )
+
+        assert series is not None
+        assert series.data_points[0] == pytest.approx((center + radius, 0))
+        assert series.data_points[90] == pytest.approx((center, radius))
+        assert series.data_points[-1] == pytest.approx((center - radius, 0))
+        assert all(
+            (x - center) ** 2 + y ** 2 == pytest.approx(radius ** 2)
+            for x, y in series.data_points
+        )
+        assert all(y >= 0 for _, y in series.data_points)
+
+    def test_hydrostatic_mohr_circle_is_a_visible_point(self, builder, case_dir):
+        (case_dir / "stress.csv").write_text("minor,major\n100,100\n")
+        series = builder.build(
+            {"source": "mohr_circle", "file": "stress.csv",
+             "x_column": "minor", "y_column": "major"},
+            {},
+        )
+
+        assert series is not None
+        assert series.data_points == [(100.0, 0.0)]
+        assert series.marker == "o"
+
+    @pytest.mark.parametrize("row_index", [2, 0.5, True])
+    def test_mohr_circle_rejects_invalid_row_index(self, builder, case_dir, row_index):
+        (case_dir / "stress.csv").write_text("minor,major\n50,150\n")
+        with pytest.raises(ValueError, match="row_index"):
+            builder.build(
+                {"source": "mohr_circle", "file": "stress.csv",
+                 "x_column": "minor", "y_column": "major", "row_index": row_index},
+                {},
+            )
+
+    @pytest.mark.parametrize("stress", ["nan", "inf"])
+    def test_mohr_circle_rejects_nonfinite_stresses(self, builder, case_dir, stress):
+        (case_dir / "stress.csv").write_text(f"minor,major\n50,{stress}\n")
+        with pytest.raises(ValueError, match="must be finite"):
+            builder.build(
+                {"source": "mohr_circle", "file": "stress.csv",
+                 "x_column": "minor", "y_column": "major"},
+                {},
+            )
+
     def test_columns_are_selected_by_name_and_transformed(self, builder, case_dir):
         (case_dir / "stage_1__comparison.csv").write_text(
             "Level [m],Shear Force [kN/m]\n0.0,1.5\n-1.0,2.5\n"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Iterable
 from .data import Mesh, read_table
@@ -96,6 +97,8 @@ class SeriesBuilder:
             return self._build_profile(spec, context)
         if source == "csv":
             return self._build_from_table(spec, context)
+        if source == "mohr_circle":
+            return self._build_mohr_circle(spec, context)
         raise ValueError(f"Unknown series source '{source}'")
 
     def _open_json(self, spec: dict[str, Any], context: dict[str, Any]) -> dict | None:
@@ -208,3 +211,37 @@ class SeriesBuilder:
             )
 
         return _series_style(spec, _sorted_points(points, spec.get("sort_by")))
+
+    def _build_mohr_circle(
+        self, spec: dict[str, Any], context: dict[str, Any]
+    ) -> DataSeries | None:
+        series = self._build_from_table(spec, context)
+        if series is None:
+            return None
+        if not series.data_points:
+            print("Warning: no valid principal-stress pairs for Mohr circle; skipping series.")
+            return None
+
+        row_index = spec.get("row_index", -1)
+        if isinstance(row_index, bool) or not isinstance(row_index, int):
+            raise ValueError("Mohr circle row_index must be an integer.")
+        if not -len(series.data_points) <= row_index < len(series.data_points):
+            raise ValueError(
+                f"Mohr circle row_index {row_index} is out of range for "
+                f"{len(series.data_points)} retained stress pairs."
+            )
+        sigma_a, sigma_b = series.data_points[row_index]
+        if not math.isfinite(sigma_a) or not math.isfinite(sigma_b):
+            raise ValueError("Mohr circle principal stresses must be finite.")
+
+        center = 0.5 * sigma_a + 0.5 * sigma_b
+        radius = abs(0.5 * sigma_a - 0.5 * sigma_b)
+        if radius == 0:
+            series.data_points = [(center, 0.0)]
+            series.marker = series.marker or "o"
+        else:
+            series.data_points = [
+                (center + radius * math.cos(angle), radius * math.sin(angle))
+                for angle in (math.pi * index / 180 for index in range(181))
+            ]
+        return series

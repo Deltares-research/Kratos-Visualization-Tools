@@ -63,12 +63,26 @@ def _sorted_points(
 
 
 def _series_style(spec: dict[str, Any], points: list[tuple[float, float]]) -> DataSeries:
+    marker_on_point_only = spec.get("marker_on_point_only", False)
+    if not isinstance(marker_on_point_only, bool):
+        raise ValueError("'marker_on_point_only' must be a boolean")
+    line_style = spec.get("line_style", "-")
+    if marker_on_point_only and str(line_style).strip().lower() in ("", "none"):
+        raise ValueError("'marker_on_point_only' requires a visible line style")
+    marker = spec.get("marker")
+    if (
+        marker_on_point_only
+        and isinstance(marker, str)
+        and marker.strip().lower() in ("", "none")
+    ):
+        raise ValueError("'marker_on_point_only' requires a visible marker")
     return DataSeries(
         data_points=points,
         label=spec.get("label", ""),
-        line_style=spec.get("line_style", "-"),
-        marker=spec.get("marker"),
+        line_style=line_style,
+        marker=marker,
         color=spec.get("color"),
+        marker_on_point_only=marker_on_point_only,
     )
 
 

@@ -211,6 +211,12 @@ Each series reads either a Kratos JSON output file or a CSV/text file.
 Common options: `label`, `line_style` (default `"-"`), `marker`, `color`,
 `sort_by` (`"x"`, `"y"` or omitted), and `expand_over_stages` (default `false`).
 
+Set `marker_on_point_only` to `true` for a line series to show a marker only
+when all plotted `(x, y)` coordinates are exactly identical (including a
+single point). The `marker` option selects its shape, defaulting to `"o"`.
+Horizontal and vertical lines remain lines without markers. This option
+requires a visible `line_style`; leave it off for marker-only series.
+
 For a combined `single` figure, set `expand_over_stages` to `true` on a series template
 to create one curve per stage in the figure's stage list. Use `{stage}` in the label and
 data options such as `filter` to distinguish the curves. This does not apply when

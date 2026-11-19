@@ -5,6 +5,63 @@ import pytest
 import plot_saved_results as psr
 
 
+@pytest.mark.parametrize(
+    ("points", "expected_marker"),
+    [
+        ([(1.0, 2.0)], "x"),
+        ([(1.0, 2.0), (1.0, 2.0)], "x"),
+        ([(1.0, 2.0), (2.0, 2.0)], "None"),
+        ([(1.0, 2.0), (1.0, 3.0)], "None"),
+        ([(1.0, 2.0), (2.0, 3.0)], "None"),
+    ],
+)
+def test_point_only_marker_depends_on_both_coordinates(points, expected_marker):
+    from kratos_visualization_tools.saved_results import building, primitives
+
+    series = building._series_style(
+        {"marker": "x", "marker_on_point_only": True}, points
+    )
+    figure, axes = primitives.plt.subplots()
+    try:
+        line, = primitives._plot_on_axis(axes, [series])
+        assert line.get_marker() == expected_marker
+        assert line.get_markevery() == ([0] if expected_marker == "x" else None)
+        assert list(zip(line.get_xdata(), line.get_ydata())) == points
+    finally:
+        primitives.plt.close(figure)
+
+
+def test_point_only_marker_defaults_to_circle_without_changing_normal_markers():
+    from kratos_visualization_tools.saved_results import building, primitives
+
+    point = building._series_style({"marker_on_point_only": True}, [(0.0, 0.0)])
+    normal = building._series_style(
+        {"marker": "^", "line_style": "None"}, [(0.0, 0.0), (1.0, 1.0)]
+    )
+    figure, axes = primitives.plt.subplots()
+    try:
+        lines = primitives._plot_on_axis(axes, [point, normal])
+        assert [line.get_marker() for line in lines] == ["o", "^"]
+    finally:
+        primitives.plt.close(figure)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"marker_on_point_only": "true"},
+        {"marker_on_point_only": True, "line_style": "None"},
+        {"marker_on_point_only": True, "line_style": ""},
+        {"marker_on_point_only": True, "marker": "None"},
+    ],
+)
+def test_point_only_marker_rejects_invalid_options(spec):
+    from kratos_visualization_tools.saved_results import building
+
+    with pytest.raises(ValueError, match="marker_on_point_only"):
+        building._series_style(spec, [(0.0, 0.0)])
+
+
 def test_equal_aspect_keeps_mohr_circle_radii_equal_on_screen():
     from kratos_visualization_tools.saved_results import figures, primitives
 

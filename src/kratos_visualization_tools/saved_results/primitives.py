@@ -27,6 +27,7 @@ class DataSeries:
     line_style: str = "-"
     marker: str | None = None
     color: str | None = None
+    marker_on_point_only: bool = False
 
 
 @dataclass
@@ -47,12 +48,21 @@ def _plot_on_axis(axes, series_collection: Iterable[DataSeries]):
     for series in series_collection:
         if not series.data_points:
             continue
+        marker = series.marker
+        markevery = None
+        if series.marker_on_point_only:
+            is_point = all(
+                point == series.data_points[0] for point in series.data_points[1:]
+            )
+            marker = (marker or "o") if is_point else None
+            markevery = [0] if is_point else None
         lines.extend(
             axes.plot(
                 *zip(*series.data_points),
                 label=series.label,
                 linestyle=series.line_style,
-                marker=series.marker,
+                marker=marker,
+                markevery=markevery,
                 color=series.color,
             )
         )
